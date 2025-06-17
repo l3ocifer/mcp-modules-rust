@@ -1,0 +1,67 @@
+# Rust
+/target/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+*.log
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Temporary directories
+tmp/
+temp/
+
+# Test artifacts
+/temp_repos/
+
+# Coverage reports
+lcov.info
+coverage/
+
+# Backup files
+*.bak
+*.backup
+*.old
+*.orig
+*.rej
+
+# Local configuration
+config.local.*
+
+# Build artifacts
+dist/
+build/
+out/
+
+# Documentation build
+docs/_build/
+
+# Cache
+.cache/
+*.cache 
