@@ -1,237 +1,216 @@
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 use serde_json::Value;
-use std::fmt;
-use futures::Future;
+use std::sync::Arc;
+use std::collections::HashMap;
+use std::future::Future;
 use std::pin::Pin;
-use crate::error::Result;
+use crate::error::{Error, Result};
+use serde::{Serialize, Deserialize};
+use std::time::Duration;
+use thiserror::Error;
 
 pub mod http;
 pub mod jsonrpc;
+pub mod mock;
 pub mod stdio;
 pub mod websocket;
-pub mod mock;
 
-pub use http::HttpTransport;
 pub use stdio::StdioTransport;
 pub use websocket::WebSocketTransport;
-pub use jsonrpc::{Message, JsonRpcError};
+pub use mock::MockTransport;
 
-#[derive(Debug)]
+/// MCP protocol version header
+pub const MCP_VERSION_HEADER: &str = "X-MCP-Version";
+
+/// MCP protocol version
+pub const MCP_PROTOCOL_VERSION: &str = "2025-06-18";
+
+/// Transport error types with performance-optimized variants
+#[derive(Debug, Clone, Error)]
 pub enum TransportError {
+    #[error("Connection error: {0}")]
     ConnectionError(String),
+    
+    #[error("Authentication failed: {0}")]
+    AuthenticationFailed(String),
+    
+    #[error("Request failed: {0}")]
+    RequestFailed(String),
+    
+    #[error("Serialization error: {0}")]
+    SerializationError(String),
+    
+    #[error("Protocol error {code}: {message}")]
+    Protocol { message: String, code: i32 },
+    
+    #[error("Send error: {0}")]
     SendError(String),
+    
+    #[error("Receive error: {0}")]
     ReceiveError(String),
+    
+    #[error("Parse error: {0}")]
     ParseError(String),
+    
+    #[error("Timeout: {0}")]
     Timeout(String),
-    Protocol { code: i64, message: String },
-    Json(serde_json::Error),
-    WebSocket(String),
-    Io(std::io::Error),
-    InvalidResponse(String),
-    Connection(String),
+    
+    #[error("Rate limit exceeded: {0}")]
+    RateLimitExceeded(String),
+    
+    #[error("Transport not supported: {0}")]
+    NotSupported(String),
+    
+    #[error("Request timeout: {message}")]
+    RequestTimeout { message: String, duration: Option<Duration> },
 }
 
 impl TransportError {
-    pub fn send<S: Into<String>>(msg: S) -> Self {
-        TransportError::SendError(msg.into())
+    /// Create connection failed error with zero-copy optimization
+    pub fn connection_failed(message: impl Into<String>) -> Self {
+        Self::ConnectionError(message.into())
     }
 
-    pub fn receive<S: Into<String>>(msg: S) -> Self {
-        TransportError::ReceiveError(msg.into())
+    /// Create authentication failed error
+    pub fn authentication_failed(message: impl Into<String>) -> Self {
+        Self::AuthenticationFailed(message.into())
     }
 
-    pub fn parse<S: Into<String>>(msg: S) -> Self {
-        TransportError::ParseError(msg.into())
+    /// Create request failed error
+    pub fn request_failed(message: impl Into<String>) -> Self {
+        Self::RequestFailed(message.into())
     }
-}
 
-impl fmt::Display for TransportError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    /// Create parse error
+    pub fn parse(message: impl Into<String>) -> Self {
+        Self::ParseError(message.into())
+    }
+
+    /// Create send error
+    pub fn send(message: impl Into<String>) -> Self {
+        Self::SendError(message.into())
+    }
+
+    /// Check if error is retryable for performance optimization
+    pub fn is_retryable(&self) -> bool {
         match self {
-            TransportError::ConnectionError(msg) => write!(f, "Connection error: {}", msg),
-            TransportError::SendError(msg) => write!(f, "Send error: {}", msg),
-            TransportError::ReceiveError(msg) => write!(f, "Receive error: {}", msg),
-            TransportError::ParseError(msg) => write!(f, "Parse error: {}", msg),
-            TransportError::Timeout(msg) => write!(f, "Timeout error: {}", msg),
-            TransportError::Protocol { code, message } => write!(f, "Protocol error: code={}, message={}", code, message),
-            TransportError::Json(e) => write!(f, "JSON error: {}", e),
-            TransportError::WebSocket(msg) => write!(f, "WebSocket error: {}", msg),
-            TransportError::Io(e) => write!(f, "IO error: {}", e),
-            TransportError::InvalidResponse(msg) => write!(f, "Invalid response error: {}", msg),
-            TransportError::Connection(msg) => write!(f, "Connection error: {}", msg),
+            TransportError::ConnectionError(_) => true,
+            TransportError::Timeout(_) => true,
+            TransportError::RequestTimeout { .. } => true,
+            TransportError::RateLimitExceeded(_) => true,
+            _ => false,
         }
     }
 }
 
-impl std::error::Error for TransportError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            TransportError::Json(e) => Some(e),
-            TransportError::Io(e) => Some(e),
-            _ => None
+// Optimized conversion implementations
+impl From<TransportError> for crate::error::TransportError {
+    fn from(err: TransportError) -> Self {
+        match err {
+            TransportError::ConnectionError(msg) => crate::error::TransportError::ConnectionFailed { message: msg, retry_count: None },
+            TransportError::AuthenticationFailed(msg) => crate::error::TransportError::AuthenticationFailed { message: msg, auth_type: None },
+            TransportError::RequestFailed(msg) => crate::error::TransportError::RequestFailed { message: msg, method: None },
+            TransportError::SerializationError(msg) => crate::error::TransportError::Serialization { message: msg, format: Some("JSON".to_string()) },
+            TransportError::SendError(msg) => crate::error::TransportError::ConnectionFailed { message: msg, retry_count: None },
+            TransportError::ReceiveError(msg) => crate::error::TransportError::ConnectionFailed { message: msg, retry_count: None },
+            TransportError::ParseError(msg) => crate::error::TransportError::Serialization { message: msg, format: Some("JSON-RPC".to_string()) },
+            TransportError::Timeout(msg) => crate::error::TransportError::RequestTimeout { 
+                message: msg, 
+                duration: Some(Duration::from_secs(30)) 
+            },
+            TransportError::NotSupported(msg) => crate::error::TransportError::NotSupported { transport_type: msg },
+            TransportError::RateLimitExceeded(msg) => crate::error::TransportError::RateLimitExceeded { message: msg, retry_after: None },
+            TransportError::RequestTimeout { message, duration } => crate::error::TransportError::RequestTimeout { message, duration },
+            TransportError::Protocol { message, code } => crate::error::TransportError::Serialization { message: format!("Protocol error {}: {}", code, message), format: Some("JSON-RPC".to_string()) },
         }
     }
 }
 
-impl From<std::io::Error> for TransportError {
-    fn from(err: std::io::Error) -> Self {
-        TransportError::Io(err)
+impl From<crate::error::TransportError> for TransportError {
+    fn from(err: crate::error::TransportError) -> Self {
+        match err {
+            crate::error::TransportError::ConnectionFailed { message, .. } => TransportError::ConnectionError(message),
+            crate::error::TransportError::AuthenticationFailed { message, .. } => TransportError::AuthenticationFailed(message),
+            crate::error::TransportError::RequestFailed { message, .. } => TransportError::RequestFailed(message),
+            crate::error::TransportError::Serialization { message, .. } => TransportError::SerializationError(message),
+            crate::error::TransportError::RateLimitExceeded { message, .. } => TransportError::RateLimitExceeded(message),
+            crate::error::TransportError::NotSupported { transport_type } => TransportError::NotSupported(transport_type),
+            crate::error::TransportError::RequestTimeout { message, duration } => TransportError::RequestTimeout { message, duration },
+            crate::error::TransportError::Protocol { message, code } => TransportError::ParseError(format!("Protocol error {}: {}", code, message)),
+        }
     }
 }
 
-impl From<serde_json::Error> for TransportError {
-    fn from(err: serde_json::Error) -> Self {
-        TransportError::Json(err)
-    }
+/// Transport types available in the system
+#[derive(Debug, Clone, PartialEq)]
+pub enum TransportType {
+    Stdio,
+    Http,
+    WebSocket,
 }
 
-/// Notification type for transporting JSON-RPC notifications
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Notification type
+#[derive(Debug, Clone)]
 pub struct Notification {
-    /// Method being called
     pub method: String,
-    /// Parameters
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub params: Option<Value>,
 }
 
 impl Notification {
-    /// Create a new notification
     pub fn new(method: String, params: Option<Value>) -> Self {
         Self { method, params }
     }
 }
 
-/// Type alias for notification handler function
+/// Notification handler function type
 pub type NotificationHandler = Arc<dyn Fn(String, Value) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
 
-/// Transport trait that must be implemented by all transport methods
+/// Transport trait for Model Context Protocol
 #[async_trait]
-pub trait Transport: Send + Sync {
-    /// Connect to the transport
-    async fn connect(&mut self) -> Result<()>;
+pub trait Transport: Send + Sync + std::fmt::Debug {
+    /// Connect to the server
+    async fn connect(&mut self) -> std::result::Result<(), TransportError>;
     
-    /// Disconnect from the transport
-    async fn disconnect(&mut self) -> Result<()>;
+    /// Disconnect from the server
+    async fn disconnect(&mut self) -> std::result::Result<(), TransportError>;
     
-    /// Send a request to the transport
-    async fn request(&mut self, method: &str, params: Option<Value>) -> Result<Value>;
+    /// Send a request and wait for response
+    async fn request(&mut self, method: &str, params: Option<Value>) -> std::result::Result<Value, TransportError>;
     
-    /// Send a notification to the transport
-    async fn notify(&mut self, method: &str, params: Option<Value>) -> Result<()>;
+    /// Send a notification (no response expected)
+    async fn notify(&mut self, method: &str, params: Option<Value>) -> std::result::Result<(), TransportError>;
     
-    /// Register a notification handler
-    async fn register_notification_handler(
-        &self,
-        handler: Arc<dyn Fn(Notification) -> Pin<Box<dyn Future<Output = Result<()>> + Send>> + Send + Sync>,
-    ) -> Result<()>;
-    
-    /// Register a callback for notifications
-    async fn on_notification(&self, notification: Notification) -> Result<()>;
-    
-    /// Check if the transport is connected
-    async fn is_connected(&self) -> bool;
-    
-    /// Get the transport type
-    fn transport_type(&self) -> &str;
-    
-    /// Send a batch request to the transport (default implementation)
-    async fn batch_request(&mut self, requests: Vec<(&str, Option<Value>)>) -> Result<Vec<Result<Value>>> {
-        let mut results = Vec::new();
-        for (method, params) in requests {
-            results.push(self.request(method, params).await);
-        }
-        Ok(results)
-    }
-
-    /// Send a message to the transport
-    async fn send(&mut self, message: Value) -> Result<()>;
-    
-    /// Receive a message from the transport
-    async fn receive(&mut self) -> Result<Value>;
+    /// Add a notification handler
+    async fn add_notification_handler(&mut self, handler: NotificationHandler) -> std::result::Result<(), TransportError>;
 }
 
-// Add Debug implementation for dyn Transport
-impl std::fmt::Debug for dyn Transport + Send + Sync {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Transport")
-            .field("type", &self.transport_type())
-            .finish()
-    }
-}
-
-/// Capability type for negotiating features
+/// MCP transport definitions for structured content and resource links
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Capability {
-    /// Whether the capability is supported
-    #[serde(default)]
-    pub supported: bool,
-    
-    /// Additional configuration for the capability
-    #[serde(flatten)]
-    pub config: serde_json::Value,
+pub struct StructuredContent {
+    pub content_type: String,
+    pub schema_url: Option<String>,
 }
 
-impl Default for Capability {
-    fn default() -> Self {
-        Self {
-            supported: false,
-            config: serde_json::Value::Object(serde_json::Map::new()),
-        }
-    }
-}
-
-/// Creates a new Message instance for a request
-pub fn create_request(id: serde_json::Value, method: &str, params: Option<serde_json::Value>) -> Message {
-    Message::Request {
-        id: Some(id),
-        method: method.to_string(),
-        params,
-    }
-}
-
-/// Creates a new Message instance for a notification
-pub fn create_notification(method: &str, params: Option<serde_json::Value>) -> Message {
-    Message::Notification {
-        method: method.to_string(),
-        params,
-    }
-}
-
-/// Creates a new Message instance for a successful response
-pub fn create_success_response(id: serde_json::Value, result: serde_json::Value) -> Message {
-    Message::Response {
-        id: Some(id),
-        result: Some(result),
-        error: None,
-    }
-}
-
-/// Creates a new Message instance for an error response
-pub fn create_error_response(id: serde_json::Value, code: i32, message: &str, data: Option<serde_json::Value>) -> Message {
-    Message::Response {
-        id: Some(id),
-        result: None,
-        error: Some(Value::from(serde_json::json!({
-            "code": code as i64,
-            "message": message.to_string(),
-            "data": data,
-        }))),
-    }
-}
-
-/// Response error object
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ResponseError {
-    /// Error code
-    pub code: i32,
-    
-    /// Error message
-    pub message: String,
-    
-    /// Additional error data
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub data: Option<serde_json::Value>,
+pub struct ResourceLink {
+    pub url: String,
+    pub title: Option<String>,
+    pub resource_type: Option<String>,
+}
+
+/// Elicitation request structure
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ElicitationRequest {
+    pub elicitation_id: String,
+    pub prompt: String,
+    pub options: Option<Vec<String>>,
+    pub metadata: Option<std::collections::HashMap<String, serde_json::Value>>,
+}
+
+/// Elicitation response structure  
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ElicitationResponse {
+    pub elicitation_id: String,
+    pub response: String,
+    pub metadata: Option<std::collections::HashMap<String, serde_json::Value>>,
 } 

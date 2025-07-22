@@ -1,6 +1,6 @@
 use crate::error::{Error, Result};
 use crate::lifecycle::LifecycleManager;
-use crate::tools::{ToolDefinition, ToolAnnotation};
+use crate::tools::ToolDefinition;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -262,7 +262,7 @@ impl<'a> AzureClient<'a> {
             }
         });
         
-        let response = self.lifecycle.send_request(method, Some(params)).await?;
+        let response = self.lifecycle.call_method(method, Some(params)).await?;
         
         Ok(response)
     }
@@ -619,7 +619,8 @@ impl<'a> AzureClient<'a> {
             return Err(Error::protocol("'content' field is not an array".to_string()));
         }
         
-        let content_array = content.as_array().unwrap();
+        let content_array = content.as_array()
+            .ok_or_else(|| Error::invalid_data("Expected array for container list"))?;
         
         for item in content_array {
             if item.get("type").and_then(|t| t.as_str()) == Some("text") {
@@ -635,181 +636,131 @@ impl<'a> AzureClient<'a> {
     
     /// Get tool definitions
     pub fn get_tool_definitions(&self) -> Vec<ToolDefinition> {
-        use crate::tools::ParameterSchema;
-        use std::collections::HashMap;
+        use crate::tools::ToolAnnotation;
         
-        let mut name_param = HashMap::new();
-        name_param.insert("name".to_string(), ParameterSchema {
-            description: Some("Name of the resource group".to_string()),
-            param_type: "string".to_string(),
-            required: true,
-            default: None,
-            enum_values: Vec::new(),
-            properties: HashMap::new(),
-            items: None,
-            additional: HashMap::new(),
-        });
-
-        let mut create_params = HashMap::new();
-        create_params.insert("name".to_string(), ParameterSchema {
-            description: Some("Name of the resource group".to_string()),
-            param_type: "string".to_string(),
-            required: true,
-            default: None,
-            enum_values: Vec::new(),
-            properties: HashMap::new(),
-            items: None,
-            additional: HashMap::new(),
-        });
-        create_params.insert("location".to_string(), ParameterSchema {
-            description: Some("Azure region location".to_string()),
-            param_type: "string".to_string(),
-            required: true,
-            default: None,
-            enum_values: Vec::new(),
-            properties: HashMap::new(),
-            items: None,
-            additional: HashMap::new(),
-        });
-        create_params.insert("tags".to_string(), ParameterSchema {
-            description: Some("Resource tags as key-value pairs".to_string()),
-            param_type: "object".to_string(),
-            required: false,
-            default: None,
-            enum_values: Vec::new(),
-            properties: HashMap::new(),
-            items: None,
-            additional: HashMap::new(),
-        });
-
-        let mut resource_group_param = HashMap::new();
-        resource_group_param.insert("resourceGroup".to_string(), ParameterSchema {
-            description: Some("Filter by resource group name".to_string()),
-            param_type: "string".to_string(),
-            required: false,
-            default: None,
-            enum_values: Vec::new(),
-            properties: HashMap::new(),
-            items: None,
-            additional: HashMap::new(),
-        });
-
-        let mut subscription_param = HashMap::new();
-        subscription_param.insert("subscriptionId".to_string(), ParameterSchema {
-            description: Some("Azure subscription ID".to_string()),
-            param_type: "string".to_string(),
-            required: false,
-            default: None,
-            enum_values: Vec::new(),
-            properties: HashMap::new(),
-            items: None,
-            additional: HashMap::new(),
-        });
-
         vec![
-            ToolDefinition {
-                name: "list_resource_groups".to_string(),
-                description: "List Azure resource groups".to_string(),
-                version: "1.0.0".to_string(),
-                parameters: HashMap::new(),
-                annotations: ToolAnnotation {
-                    read_only: true,
-                    has_side_effects: false,
-                    destructive: false,
-                    requires_confirmation: false,
-                    ..Default::default()
-                },
-                lifecycle_manager: None,
-            },
-            ToolDefinition {
-                name: "get_resource_group".to_string(),
-                description: "Get details of an Azure resource group".to_string(),
-                version: "1.0.0".to_string(),
-                parameters: name_param.clone(),
-                annotations: ToolAnnotation {
-                    read_only: true,
-                    has_side_effects: false,
-                    destructive: false,
-                    requires_confirmation: false,
-                    ..Default::default()
-                },
-                lifecycle_manager: None,
-            },
-            ToolDefinition {
-                name: "create_resource_group".to_string(),
-                description: "Create an Azure resource group".to_string(),
-                version: "1.0.0".to_string(),
-                parameters: create_params,
-                annotations: ToolAnnotation {
-                    read_only: false,
-                    has_side_effects: true,
-                    destructive: false,
-                    requires_confirmation: true,
-                    ..Default::default()
-                },
-                lifecycle_manager: None,
-            },
-            ToolDefinition {
-                name: "delete_resource_group".to_string(),
-                description: "Delete an Azure resource group".to_string(),
-                version: "1.0.0".to_string(),
-                parameters: name_param,
-                annotations: ToolAnnotation {
-                    read_only: false,
-                    has_side_effects: true,
-                    destructive: true,
-                    requires_confirmation: true,
-                    ..Default::default()
-                },
-                lifecycle_manager: None,
-            },
-            ToolDefinition {
-                name: "list_resources".to_string(),
-                description: "List Azure resources".to_string(),
-                version: "1.0.0".to_string(),
-                parameters: resource_group_param,
-                annotations: ToolAnnotation {
-                    read_only: true,
-                    has_side_effects: false,
-                    destructive: false,
-                    requires_confirmation: false,
-                    ..Default::default()
-                },
-                lifecycle_manager: None,
-            },
-            ToolDefinition {
-                name: "list_subscriptions".to_string(),
-                description: "List Azure subscriptions".to_string(),
-                version: "1.0.0".to_string(),
-                parameters: HashMap::new(),
-                annotations: ToolAnnotation {
-                    read_only: true,
-                    has_side_effects: false,
-                    destructive: false,
-                    requires_confirmation: false,
-                    ..Default::default()
-                },
-                lifecycle_manager: None,
-            },
-            ToolDefinition {
-                name: "list_locations".to_string(),
-                description: "List Azure locations".to_string(),
-                version: "1.0.0".to_string(),
-                parameters: subscription_param,
-                annotations: ToolAnnotation {
-                    read_only: true,
-                    has_side_effects: false,
-                    destructive: false,
-                    requires_confirmation: false,
-                    ..Default::default()
-                },
-                lifecycle_manager: None,
-            },
+            ToolDefinition::from_json_schema(
+                "list_resource_groups",
+                "List Azure resource groups",
+                "azure_resource_management",
+                serde_json::json!({
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }),
+                Some(ToolAnnotation::new("data_retrieval").with_description("List Azure resource groups")
+                    .with_usage_hints(vec!["Use to get all resource groups in subscription".to_string()]))
+            ),
+            ToolDefinition::from_json_schema(
+                "get_resource_group",
+                "Get details of an Azure resource group",
+                "azure_resource_management",
+                serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "Name of the resource group"
+                        }
+                    },
+                    "required": ["name"]
+                }),
+                Some(ToolAnnotation::new("data_retrieval").with_description("Get details of an Azure resource group")
+                    .with_usage_hints(vec!["Use to get details of a specific resource group".to_string()]))
+            ),
+            ToolDefinition::from_json_schema(
+                "create_resource_group",
+                "Create an Azure resource group",
+                "azure_resource_management",
+                serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "Name of the resource group"
+                        },
+                        "location": {
+                            "type": "string",
+                            "description": "Azure region location"
+                        },
+                        "tags": {
+                            "type": "object",
+                            "description": "Resource tags as key-value pairs",
+                            "additionalProperties": {"type": "string"}
+                        }
+                    },
+                    "required": ["name", "location"]
+                }),
+                Some(ToolAnnotation::new("resource_management").with_description("Create an Azure resource group")
+                    .with_security_notes(vec!["Requires confirmation".to_string(), "Has side effects".to_string()]))
+            ),
+            ToolDefinition::from_json_schema(
+                "delete_resource_group",
+                "Delete an Azure resource group",
+                "azure_resource_management",
+                serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "Name of the resource group to delete"
+                        }
+                    },
+                    "required": ["name"]
+                }),
+                Some(ToolAnnotation::new("resource_management").with_description("Delete an Azure resource group")
+                    .with_security_notes(vec!["Destructive operation".to_string(), "Requires confirmation".to_string()]))
+            ),
+            ToolDefinition::from_json_schema(
+                "list_resources",
+                "List Azure resources",
+                "azure_resource_management",
+                serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "resourceGroup": {
+                            "type": "string",
+                            "description": "Filter by resource group name"
+                        }
+                    },
+                    "required": []
+                }),
+                Some(ToolAnnotation::new("data_retrieval").with_description("List Azure resources")
+                    .with_usage_hints(vec!["Use to list all resources or filter by resource group".to_string()]))
+            ),
+            ToolDefinition::from_json_schema(
+                "list_subscriptions",
+                "List Azure subscriptions",
+                "azure_subscription_management",
+                serde_json::json!({
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }),
+                Some(ToolAnnotation::new("data_retrieval").with_description("List Azure subscriptions")
+                    .with_usage_hints(vec!["Use to get all available Azure subscriptions".to_string()]))
+            ),
+            ToolDefinition::from_json_schema(
+                "list_locations",
+                "List Azure locations",
+                "azure_subscription_management",
+                serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "subscriptionId": {
+                            "type": "string",
+                            "description": "Azure subscription ID"
+                        }
+                    },
+                    "required": []
+                }),
+                Some(ToolAnnotation::new("data_retrieval").with_description("List Azure locations")
+                    .with_usage_hints(vec!["Use to get available Azure regions".to_string()]))
+            ),
         ]
     }
 
     /// Azure DevOps work item methods
-
     /// List work items using WIQL query
     pub async fn list_work_items(&self, project: &str, query: &str) -> Result<WorkItemQueryResult> {
         let script = format!(r#"
@@ -1072,7 +1023,6 @@ impl<'a> AzureClient<'a> {
     }
 
     /// Azure DevOps build and release methods
-
     /// List build definitions
     pub async fn list_build_definitions(&self, project: &str) -> Result<Vec<BuildDefinition>> {
         let script = format!(r#"

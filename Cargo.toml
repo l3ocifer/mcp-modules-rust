@@ -2,35 +2,136 @@
 name = "devops-mcp"
 version = "0.1.0"
 edition = "2021"
-description = "A comprehensive Rust SDK for the Model Context Protocol (MCP) designed specifically for DevOps architects in tech consulting"
-authors = ["DevOps Architect Team"]
+description = "A comprehensive modular Rust implementation of the Model Context Protocol (MCP) designed specifically for DevOps workflows"
 license = "MIT"
-repository = "https://github.com/devops-architect/devops-architect-mcp"
-readme = "README.md"
-keywords = ["devops", "mcp", "sdk", "api", "cloud"]
-categories = ["api-bindings", "web-programming"]
+authors = ["DevOps MCP Contributors"]
+repository = "https://github.com/devops-mcp/mcp-modules-rust"
+homepage = "https://github.com/devops-mcp/mcp-modules-rust"
+documentation = "https://docs.rs/devops-mcp"
+keywords = ["mcp", "devops", "protocol", "api", "integration"]
+categories = ["api-bindings", "development-tools", "web-programming"]
 
 [dependencies]
-reqwest = { version = "0.11", features = ["json", "stream"] }
+# Core async runtime - Updated to fix vulnerability RUSTSEC-2025-0023
+tokio = { version = "1.46", features = ["full"] }
+async-trait = "0.1"
+futures = "0.3"
+futures-util = "0.3"
+
+# Serialization
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-tokio = { version = "1.36", features = ["full"] }
-async-trait = "0.1"
-chrono = { version = "0.4", features = ["serde"] }
-uuid = { version = "1.7", features = ["v4", "serde"] }
-thiserror = "1.0"
+
+# HTTP client and server with security features
+reqwest = { version = "0.12", features = ["json", "multipart", "stream", "rustls-tls"], default-features = false }
+hyper = { version = "1.0", features = ["full"] }
+hyper-util = { version = "0.1", features = ["full"] }
+axum = { version = "0.7", features = ["json", "multipart", "ws"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+
+# WebSocket support with rustls for security
+tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"], default-features = false }
+
+# OAuth 2.1 and authentication (MCP 2025-06-18)
+oauth2 = "5.0"
 url = "2.5"
-base64 = "0.21"
+base64 = "0.22"
+
+# JSON Schema validation (MCP 2025-06-18)
+jsonschema = "0.19"
+
+# UUID generation (MCP 2025-06-18)
+uuid = { version = "1.10", features = ["v4", "serde"] }
+
+# Time handling
+chrono = { version = "0.4", features = ["serde"] }
+
+# Error handling
+thiserror = "2.0"
+anyhow = "1.0"
+
+# Security enhancements
+secrecy = "0.10"          # Secure storage for secrets
+zeroize = "1.8"           # Secure memory wiping
+ring = "0.17"             # Cryptographic primitives
+rustls = "0.23"           # Modern TLS implementation
+rustls-webpki = "0.103"   # Certificate validation
+rustls-pemfile = "2.0"    # PEM file support
+
+# Input validation and sanitization
+regex = "1.10"
+sanitize-filename = "0.5"
+percent-encoding = "2.3"
+
+# Rate limiting and security
+governor = "0.6"          # Rate limiting
+constant_time_eq = "0.4"  # Constant-time comparisons
+
+# Logging with security considerations
 log = "0.4"
-futures = "0.3"
-jsonrpc-core = "18.0"
-jsonrpc-http-server = "18.0"
-oauth2 = "4.4"
-tokio-tungstenite = { version = "0.21", features = ["native-tls"] }
 tracing = "0.1"
-tracing-subscriber = "0.3"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Database support with secure defaults
+mongodb = { version = "2.8", optional = true }
+sqlx = { version = "0.8", features = ["runtime-tokio-rustls", "postgres", "uuid", "chrono", "json"], optional = true }
+
+# Cloud providers
+aws-config = { version = "1.0", optional = true }
+aws-sdk-s3 = { version = "1.0", optional = true }
+
+# Azure support (optional)
+azure_core = { version = "0.21", optional = true }
+azure_storage = { version = "0.21", optional = true }
+azure_storage_blobs = { version = "0.21", optional = true }
+
+# Kubernetes support (optional)
+kube = { version = "0.99", features = ["runtime", "derive"], optional = true }
+k8s-openapi = { version = "0.24", features = ["latest"], optional = true }
+
+# Docker support (optional)
+bollard = { version = "0.18", optional = true }
+
+# Security and cryptography
+argon2 = "0.5"           # Secure password hashing
+rand = "0.9"             # Cryptographically secure random numbers
+subtle = "2.6"           # Constant-time operations
+
+# Additional security dependencies
+rustls-native-certs = "0.8"
+webpki-roots = "0.26"
+
+[features]
+default = ["rustls-tls"]
+rustls-tls = ["reqwest/rustls-tls", "tokio-tungstenite/rustls-tls-webpki-roots"]
+native-tls = ["reqwest/native-tls", "tokio-tungstenite/native-tls"]
+
+# Full feature set
+full = [
+    "database",
+    "cloud", 
+    "containers",
+    "analytics",
+    "smart-home",
+]
+
+# Database support
+database = ["mongodb", "sqlx"]
+
+# Cloud provider support
+cloud = ["aws-config", "aws-sdk-s3", "azure_core", "azure_storage", "azure_storage_blobs"]
+
+# Container orchestration
+containers = ["kube", "k8s-openapi", "bollard"]
+
+# Analytics and monitoring
+analytics = []
+
+# Smart home integration
+smart-home = []
 
 [dev-dependencies]
 tokio-test = "0.4"
 mockito = "1.2"
-wiremock = "0.5"
+tempfile = "3.8"

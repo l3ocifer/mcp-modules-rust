@@ -2,14 +2,23 @@ use reqwest::Client as ReqwestClient;
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use serde::{Serialize, Deserialize};
 
-use crate::config::CloudflareConfig;
 use crate::error::{Error, Result};
+use serde_json::Value;
+use std::collections::HashMap;
+
+#[derive(Debug, Clone)]
+pub struct CloudflareConfig {
+    pub api_token: String,
+    pub zone_id: String,
+    pub account_id: String,
+}
 
 /// Cloudflare API client for MCP
 pub struct CloudflareClient {
     /// HTTP client
     client: ReqwestClient,
     /// API key
+    #[allow(dead_code)]
     api_key: String,
     /// Account ID
     account_id: String,
@@ -93,7 +102,7 @@ impl CloudflareClient {
     /// Create a new Cloudflare client
     pub fn new(config: CloudflareConfig) -> Result<Self> {
         let mut headers = HeaderMap::new();
-        headers.insert(AUTHORIZATION, HeaderValue::from_str(&format!("Bearer {}", &config.api_key))
+        headers.insert(AUTHORIZATION, HeaderValue::from_str(&format!("Bearer {}", &config.api_token))
             .map_err(|e| Error::config(format!("Invalid API key: {}", e)))?);
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         
@@ -104,7 +113,7 @@ impl CloudflareClient {
             
         Ok(Self {
             client,
-            api_key: config.api_key,
+            api_key: config.api_token,
             account_id: config.account_id,
         })
     }

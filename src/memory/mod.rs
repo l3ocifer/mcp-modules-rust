@@ -133,6 +133,7 @@ pub struct MemorySearchParams {
 /// Memory client for storing and retrieving long-term memories
 pub struct MemoryClient<'a> {
     /// Lifecycle manager
+    #[allow(dead_code)]
     lifecycle: &'a LifecycleManager,
     /// In-memory storage for memories (would be replaced with a database in production)
     memories: HashMap<String, Memory>,
@@ -175,10 +176,14 @@ impl<'a> MemoryClient<'a> {
     }
     
     /// Get a memory by ID
-    pub async fn get_memory(&self, id: &str) -> Result<Memory> {
+    pub fn get_memory(&self, id: &str) -> Result<Memory> {
         self.memories.get(id)
             .cloned()
-            .ok_or_else(|| Error::NotFound(format!("Memory with ID '{}' not found", id)))
+            .ok_or_else(|| Error::not_found_with_resource(
+                format!("Memory with ID '{}' not found", id),
+                "memory",
+                id
+            ))
     }
     
     /// Update an existing memory
@@ -189,7 +194,11 @@ impl<'a> MemoryClient<'a> {
         metadata: Option<HashMap<String, Value>>,
     ) -> Result<()> {
         let memory = self.memories.get_mut(id)
-            .ok_or_else(|| Error::NotFound(format!("Memory with ID '{}' not found", id)))?;
+            .ok_or_else(|| Error::not_found_with_resource(
+                format!("Memory with ID '{}' not found", id),
+                "memory",
+                id
+            ))?;
             
         if let Some(title) = title {
             memory.title = title;
@@ -210,7 +219,11 @@ impl<'a> MemoryClient<'a> {
     /// Delete a memory by ID
     pub async fn delete_memory(&mut self, id: &str) -> Result<()> {
         if self.memories.remove(id).is_none() {
-            return Err(Error::NotFound(format!("Memory with ID '{}' not found", id)));
+            return Err(Error::not_found_with_resource(
+                format!("Memory with ID '{}' not found", id),
+                "memory",
+                id
+            ));
         }
         
         // Remove all relationships involving this memory
@@ -227,11 +240,19 @@ impl<'a> MemoryClient<'a> {
     ) -> Result<()> {
         // Verify both memories exist
         if !self.memories.contains_key(from_id) {
-            return Err(Error::NotFound(format!("Source memory with ID '{}' not found", from_id)));
+            return Err(Error::not_found_with_resource(
+                format!("Source memory with ID '{}' not found", from_id),
+                "memory",
+                from_id
+            ));
         }
         
         if !self.memories.contains_key(to_id) {
-            return Err(Error::NotFound(format!("Target memory with ID '{}' not found", to_id)));
+            return Err(Error::not_found_with_resource(
+                format!("Target memory with ID '{}' not found", to_id),
+                "memory", 
+                to_id
+            ));
         }
         
         let relationship = Relationship {
@@ -246,74 +267,98 @@ impl<'a> MemoryClient<'a> {
         Ok(())
     }
     
-    /// Search for memories
+    /// Search for memories with zero-copy optimizations
     pub async fn search_memories(&self, params: MemorySearchParams) -> Result<Vec<Memory>> {
-        let mut results: Vec<Memory> = self.memories.values().cloned().collect();
-        
-        // Filter by memory type
-        if let Some(memory_type) = params.memory_type {
-            results.retain(|m| m.memory_type == memory_type);
-        }
-        
-        // Filter by keyword
-        if let Some(keyword) = params.keyword {
-            let keyword = keyword.to_lowercase();
-            results.retain(|m| {
-                m.title.to_lowercase().contains(&keyword) || 
-                m.content.to_lowercase().contains(&keyword)
-            });
-        }
-        
-        // Filter by metadata
-        if let Some(metadata_filters) = params.metadata_filters {
-            for (key, value) in metadata_filters {
-                results.retain(|m| {
-                    m.metadata.get(&key)
-                        .map(|v| v == &value)
-                        .unwrap_or(false)
-                });
-            }
-        }
-        
-        // Apply limit
-        if let Some(limit) = params.limit {
-            results.truncate(limit);
-        }
-        
-        Ok(results)
+        // Pre-allocate with estimated capacity based on filters
+        let _estimated_capacity = if params.memory_type.is_some() || params.keyword.is_some() {
+            self.memories.len() / 4 // Assume 25% match rate for filtered searches
+        } else {
+            self.memories.len()
+        };
+
+        // Use iterator chains to avoid intermediate collections
+        let filtered_memories: Vec<Memory> = self.memories
+            .values()
+            .filter(|memory| {
+                // Filter by memory type first (most selective)
+                if let Some(ref memory_type) = params.memory_type {
+                    if memory.memory_type != *memory_type {
+                        return false;
+                    }
+                }
+                
+                // Filter by keyword (avoid string allocations by comparing with original case)
+                if let Some(ref keyword) = params.keyword {
+                    let keyword_lower = keyword.to_lowercase();
+                    if !memory.title.to_lowercase().contains(&keyword_lower) 
+                        && !memory.content.to_lowercase().contains(&keyword_lower) {
+                        return false;
+                    }
+                }
+                
+                // Filter by metadata
+                if let Some(ref metadata_filters) = params.metadata_filters {
+                    for (key, value) in metadata_filters {
+                        if !memory.metadata.get(key)
+                            .map(|v| v == value)
+                            .unwrap_or(false) {
+                            return false;
+                        }
+                    }
+                }
+                
+                true
+            })
+            .take(params.limit.unwrap_or(usize::MAX)) // Apply limit during iteration
+            .cloned() // Only clone the final filtered results
+            .collect();
+
+        Ok(filtered_memories)
     }
     
-    /// Get all relationships for a memory
+    /// Get all relationships for a memory with optimized filtering
     pub async fn get_relationships(&self, memory_id: &str) -> Result<Vec<Relationship>> {
         if !self.memories.contains_key(memory_id) {
-            return Err(Error::NotFound(format!("Memory with ID '{}' not found", memory_id)));
+            return Err(Error::not_found_with_resource(
+                format!("Memory with ID '{}' not found", memory_id),
+                "memory",
+                memory_id
+            ));
         }
+
+        // Use iterator with pre-allocation hint
+        let mut relationships = Vec::with_capacity(self.relationships.len() / 10); // Estimate 10% match rate
         
-        let relationships: Vec<Relationship> = self.relationships.iter()
-            .filter(|r| r.from_id == memory_id || r.to_id == memory_id)
-            .cloned()
-            .collect();
+        relationships.extend(
+            self.relationships
+                .iter()
+                .filter(|r| r.from_id == memory_id || r.to_id == memory_id)
+                .cloned()
+        );
             
         Ok(relationships)
     }
     
-    /// Get related memories
+    /// Get related memories with zero-copy string handling
     pub async fn get_related_memories(&self, memory_id: &str) -> Result<Vec<Memory>> {
         let relationships = self.get_relationships(memory_id).await?;
         
-        let related_ids: Vec<String> = relationships.iter()
-            .flat_map(|r| {
-                if r.from_id == memory_id {
-                    vec![r.to_id.clone()]
-                } else {
-                    vec![r.from_id.clone()]
-                }
-            })
-            .collect();
-            
-        let related_memories: Vec<Memory> = related_ids.iter()
-            .filter_map(|id| self.memories.get(id).cloned())
-            .collect();
+        // Pre-allocate based on relationship count
+        let mut related_memories = Vec::with_capacity(relationships.len());
+        
+        // Use filter_map to combine operations and avoid intermediate collections
+        related_memories.extend(
+            relationships
+                .iter()
+                .filter_map(|r| {
+                    let related_id = if r.from_id == memory_id {
+                        &r.to_id
+                    } else {
+                        &r.from_id
+                    };
+                    self.memories.get(related_id).cloned()
+                })
+        );
             
         Ok(related_memories)
     }

@@ -33,6 +33,7 @@ pub struct ContainerCreateParams {
 /// Docker client for managing Docker containers and images
 pub struct DockerClient {
     /// Lifecycle manager
+    #[allow(dead_code)]
     lifecycle: Arc<LifecycleManager>,
 }
 
@@ -44,28 +45,29 @@ impl DockerClient {
         }
     }
 
-    /// Execute a Docker command and return the output
-    pub async fn execute_command(&self, command: &str) -> Result<String> {
-        let output = Command::new("sh")
-            .arg("-c")
-            .arg(format!("docker {}", command))
+    async fn run_docker_command(&self, args: &[&str]) -> Result<String> {
+        let output = tokio::process::Command::new("docker")
+            .args(args)
             .output()
-            .map_err(|e| Error::External(format!("Failed to execute Docker command: {}", e)))?;
+            .await
+            .map_err(|e| Error::internal(format!("Failed to execute Docker command: {}", e)))?;
         
         if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-            return Err(Error::External(format!("Docker command failed: {}", stderr)));
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            return Err(Error::internal(format!("Docker command failed: {}", stderr)));
         }
         
-        let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-        Ok(stdout)
+        Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
 
     /// List all Docker containers
     pub async fn list_containers(&self, show_all: bool) -> Result<Vec<Container>> {
-        let output = self.execute_command(&format!("ps {} --format \"{{{{.ID}}}}\\t{{{{.Image}}}}\\t{{{{.Status}}}}\\t{{{{.Names}}}}\"", 
-            if show_all { "-a" } else { "" }
-        )).await?;
+        let output = self.run_docker_command(&[
+            "ps",
+            if show_all { "-a" } else { "" },
+            "--format",
+            "{{{{.ID}}}}\\t{{{{.Image}}}}\\t{{{{.Status}}}}\\t{{{{.Names}}}}",
+        ]).await?;
         
         let mut containers = Vec::new();
         for line in output.lines() {
@@ -105,22 +107,22 @@ impl DockerClient {
         
         cmd.push_str(&format!(" {}", params.image));
         
-        self.execute_command(&cmd).await
+        self.run_docker_command(&cmd.split_whitespace().collect::<Vec<&str>>()).await
     }
 
     /// Stop a Docker container
     pub async fn stop_container(&self, id: &str) -> Result<String> {
-        self.execute_command(&format!("stop {}", id)).await
+        self.run_docker_command(&["stop", id]).await
     }
 
     /// Start a Docker container
     pub async fn start_container(&self, id: &str) -> Result<String> {
-        self.execute_command(&format!("start {}", id)).await
+        self.run_docker_command(&["start", id]).await
     }
 
     /// Remove a Docker container
     pub async fn remove_container(&self, id: &str, force: bool) -> Result<String> {
-        self.execute_command(&format!("rm {} {}", if force { "-f" } else { "" }, id)).await
+        self.run_docker_command(&["rm", if force { "-f" } else { "" }, id]).await
     }
 
     /// Get container logs
@@ -130,12 +132,12 @@ impl DockerClient {
             None => String::new(),
         };
         
-        self.execute_command(&format!("logs {} {}", tail_opt, id)).await
+        self.run_docker_command(&["logs", tail_opt.as_str(), id]).await
     }
 
     /// Execute a command in a container
     pub async fn exec_in_container(&self, id: &str, command: &str) -> Result<String> {
-        self.execute_command(&format!("exec {} {}", id, command)).await
+        self.run_docker_command(&["exec", id, command]).await
     }
 
     /// Get registered tools

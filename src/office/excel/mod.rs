@@ -154,7 +154,7 @@ impl<'a> ExcelClient<'a> {
             }
         });
 
-        let response = self.lifecycle.send_request(method, Some(params)).await?;
+        let response = self.lifecycle.call_method(method, Some(params)).await?;
         let workbook_id = response["workbook_id"]
             .as_str()
             .ok_or_else(|| Error::parsing("Failed to parse workbook ID"))?
@@ -197,7 +197,7 @@ impl<'a> ExcelClient<'a> {
             "args": args
         });
 
-        let response = self.lifecycle.send_request(method, Some(params)).await?;
+        let response = self.lifecycle.call_method(method, Some(params)).await?;
         let worksheet_id = response["worksheet_id"]
             .as_str()
             .ok_or_else(|| Error::parsing("Failed to parse worksheet ID"))?
@@ -217,7 +217,7 @@ impl<'a> ExcelClient<'a> {
             }
         });
 
-        self.lifecycle.send_request(method, Some(params)).await?;
+        self.lifecycle.call_method(method, Some(params)).await?;
         Ok(())
     }
 
@@ -231,7 +231,7 @@ impl<'a> ExcelClient<'a> {
             }
         });
 
-        let response = self.lifecycle.send_request(method, Some(params)).await?;
+        let response = self.lifecycle.call_method(method, Some(params)).await?;
         let worksheets = serde_json::from_value(response["worksheets"].clone())
             .map_err(|e| Error::parsing(format!("Failed to parse worksheets: {}", e)))?;
 
@@ -257,7 +257,7 @@ impl<'a> ExcelClient<'a> {
             }
         });
 
-        self.lifecycle.send_request(method, Some(params)).await?;
+        self.lifecycle.call_method(method, Some(params)).await?;
         Ok(())
     }
 
@@ -273,7 +273,7 @@ impl<'a> ExcelClient<'a> {
             }
         });
 
-        let response = self.lifecycle.send_request(method, Some(params)).await?;
+        let response = self.lifecycle.call_method(method, Some(params)).await?;
         let row_index = response["row_index"]
             .as_u64()
             .ok_or_else(|| Error::parsing("Failed to parse row index"))?;
@@ -293,7 +293,7 @@ impl<'a> ExcelClient<'a> {
             }
         });
 
-        self.lifecycle.send_request(method, Some(params)).await?;
+        self.lifecycle.call_method(method, Some(params)).await?;
         Ok(())
     }
 
@@ -309,7 +309,7 @@ impl<'a> ExcelClient<'a> {
             }
         });
 
-        let response = self.lifecycle.send_request(method, Some(params)).await?;
+        let response = self.lifecycle.call_method(method, Some(params)).await?;
         let chart_id = response["chart_id"]
             .as_str()
             .ok_or_else(|| Error::parsing("Failed to parse chart ID"))?
@@ -331,7 +331,7 @@ impl<'a> ExcelClient<'a> {
             }
         });
 
-        self.lifecycle.send_request(method, Some(params)).await?;
+        self.lifecycle.call_method(method, Some(params)).await?;
         Ok(())
     }
 
@@ -348,7 +348,7 @@ impl<'a> ExcelClient<'a> {
             }
         });
 
-        self.lifecycle.send_request(method, Some(params)).await?;
+        self.lifecycle.call_method(method, Some(params)).await?;
         Ok(())
     }
 
@@ -363,7 +363,7 @@ impl<'a> ExcelClient<'a> {
             }
         });
 
-        self.lifecycle.send_request(method, Some(params)).await?;
+        self.lifecycle.call_method(method, Some(params)).await?;
         Ok(())
     }
 
@@ -377,7 +377,7 @@ impl<'a> ExcelClient<'a> {
             }
         });
 
-        let response = self.lifecycle.send_request(method, Some(params)).await?;
+        let response = self.lifecycle.call_method(method, Some(params)).await?;
         let workbook_id = response["workbook_id"]
             .as_str()
             .ok_or_else(|| Error::parsing("Failed to parse workbook ID"))?
@@ -396,7 +396,7 @@ impl<'a> ExcelClient<'a> {
             }
         });
 
-        let response = self.lifecycle.send_request(method, Some(params)).await?;
+        let response = self.lifecycle.call_method(method, Some(params)).await?;
         let workbook_id = response["workbook_id"]
             .as_str()
             .ok_or_else(|| Error::parsing("Failed to parse workbook ID"))?
@@ -420,7 +420,7 @@ impl<'a> ExcelClient<'a> {
                     },
                     "required": ["title"]
                 }),
-                Some(ToolAnnotation::new("spreadsheet_creator", "Creates a new workbook")),
+                Some(ToolAnnotation::new("spreadsheet_creator").with_description("Creates a new workbook")),
             ),
             ToolDefinition::from_json_schema(
                 "add_worksheet",
@@ -434,7 +434,7 @@ impl<'a> ExcelClient<'a> {
                     },
                     "required": ["workbook_id", "name"]
                 }),
-                Some(ToolAnnotation::new("worksheet_manager", "Adds a worksheet to a workbook")),
+                Some(ToolAnnotation::new("worksheet_manager").with_description("Adds a worksheet to a workbook")),
             ),
             ToolDefinition::from_json_schema(
                 "delete_worksheet",
@@ -448,7 +448,7 @@ impl<'a> ExcelClient<'a> {
                     },
                     "required": ["workbook_id", "worksheet_id"]
                 }),
-                Some(ToolAnnotation::new("worksheet_manager", "Deletes a worksheet")),
+                Some(ToolAnnotation::new("worksheet_manager").with_description("Deletes a worksheet")),
             ),
             ToolDefinition::from_json_schema(
                 "get_worksheets",
@@ -461,7 +461,7 @@ impl<'a> ExcelClient<'a> {
                     },
                     "required": ["workbook_id"]
                 }),
-                Some(ToolAnnotation::new("worksheet_manager", "Gets all worksheets in a workbook")),
+                Some(ToolAnnotation::new("worksheet_manager").with_description("Gets all worksheets in a workbook")),
             ),
             ToolDefinition::from_json_schema(
                 "update_cells",
@@ -487,7 +487,7 @@ impl<'a> ExcelClient<'a> {
                     },
                     "required": ["workbook_id", "worksheet_id", "cells"]
                 }),
-                Some(ToolAnnotation::new("cell_manager", "Updates cell values")),
+                Some(ToolAnnotation::new("cell_manager").with_description("Updates cell values")),
             ),
             ToolDefinition::from_json_schema(
                 "add_row",
@@ -502,7 +502,7 @@ impl<'a> ExcelClient<'a> {
                     },
                     "required": ["workbook_id", "worksheet_id", "cells"]
                 }),
-                Some(ToolAnnotation::new("row_manager", "Adds a row to a worksheet")),
+                Some(ToolAnnotation::new("row_manager").with_description("Adds a row to a worksheet")),
             ),
             ToolDefinition::from_json_schema(
                 "delete_row",
@@ -517,7 +517,7 @@ impl<'a> ExcelClient<'a> {
                     },
                     "required": ["workbook_id", "worksheet_id", "row_index"]
                 }),
-                Some(ToolAnnotation::new("row_manager", "Deletes a row from a worksheet")),
+                Some(ToolAnnotation::new("row_manager").with_description("Deletes a row from a worksheet")),
             ),
             ToolDefinition::from_json_schema(
                 "add_chart",
@@ -534,7 +534,7 @@ impl<'a> ExcelClient<'a> {
                     },
                     "required": ["workbook_id", "worksheet_id", "chart_type", "title", "data_range"]
                 }),
-                Some(ToolAnnotation::new("chart_manager", "Adds a chart to a worksheet")),
+                Some(ToolAnnotation::new("chart_manager").with_description("Adds a chart to a worksheet")),
             ),
             ToolDefinition::from_json_schema(
                 "apply_formula",
@@ -550,7 +550,7 @@ impl<'a> ExcelClient<'a> {
                     },
                     "required": ["workbook_id", "worksheet_id", "cell_range", "formula"]
                 }),
-                Some(ToolAnnotation::new("formula_manager", "Applies a formula to cells")),
+                Some(ToolAnnotation::new("formula_manager").with_description("Applies a formula to cells")),
             ),
             ToolDefinition::from_json_schema(
                 "format_cells",
@@ -566,7 +566,7 @@ impl<'a> ExcelClient<'a> {
                     },
                     "required": ["workbook_id", "worksheet_id", "cell_range", "format"]
                 }),
-                Some(ToolAnnotation::new("formatting_manager", "Formats cells")),
+                Some(ToolAnnotation::new("formatting_manager").with_description("Formats cells")),
             ),
             ToolDefinition::from_json_schema(
                 "save_workbook",
@@ -580,7 +580,7 @@ impl<'a> ExcelClient<'a> {
                     },
                     "required": ["workbook_id", "filepath"]
                 }),
-                Some(ToolAnnotation::new("workbook_manager", "Saves a workbook to a file")),
+                Some(ToolAnnotation::new("workbook_manager").with_description("Saves a workbook to a file")),
             ),
             ToolDefinition::from_json_schema(
                 "load_workbook",
@@ -593,7 +593,7 @@ impl<'a> ExcelClient<'a> {
                     },
                     "required": ["filepath"]
                 }),
-                Some(ToolAnnotation::new("workbook_manager", "Loads a workbook from a file")),
+                Some(ToolAnnotation::new("workbook_manager").with_description("Loads a workbook from a file")),
             ),
             ToolDefinition::from_json_schema(
                 "generate_spreadsheet",
@@ -606,7 +606,7 @@ impl<'a> ExcelClient<'a> {
                     },
                     "required": ["data_description"]
                 }),
-                Some(ToolAnnotation::new("spreadsheet_creator", "Generates a spreadsheet using AI")),
+                Some(ToolAnnotation::new("spreadsheet_creator").with_description("Generates a spreadsheet using AI")),
             ),
         ]
     }

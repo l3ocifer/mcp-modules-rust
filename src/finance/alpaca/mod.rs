@@ -245,6 +245,7 @@ pub enum OrderQueryType {
 /// Client for Alpaca trading API
 pub struct AlpacaClient<'a> {
     /// Lifecycle manager
+    #[allow(dead_code)]
     lifecycle: &'a LifecycleManager,
     /// HTTP client
     client: Client,
@@ -307,18 +308,18 @@ impl<'a> AlpacaClient<'a> {
             .header("APCA-API-SECRET-KEY", &self.api_secret)
             .send()
             .await
-            .map_err(|e| Error::External(format!("Failed to get account information: {}", e)))?;
+            .map_err(|e| Error::network(format!("Failed to get account information: {}", e)))?;
             
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await
                 .unwrap_or_else(|_| "Unable to read error response".into());
-            return Err(Error::External(format!("Alpaca API returned error {}: {}", status, text)));
+            return Err(Error::network(format!("Alpaca API returned error {}: {}", status, text)));
         }
         
         let account: Account = response.json()
             .await
-            .map_err(|e| Error::External(format!("Failed to parse account response: {}", e)))?;
+            .map_err(|e| Error::network(format!("Failed to parse account response: {}", e)))?;
             
         Ok(account)
     }
@@ -334,18 +335,18 @@ impl<'a> AlpacaClient<'a> {
             .header("APCA-API-SECRET-KEY", &self.api_secret)
             .send()
             .await
-            .map_err(|e| Error::External(format!("Failed to get positions: {}", e)))?;
+            .map_err(|e| Error::network(format!("Failed to get positions: {}", e)))?;
             
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await
                 .unwrap_or_else(|_| "Unable to read error response".into());
-            return Err(Error::External(format!("Alpaca API returned error {}: {}", status, text)));
+            return Err(Error::network(format!("Alpaca API returned error {}: {}", status, text)));
         }
         
         let positions: Vec<Position> = response.json()
             .await
-            .map_err(|e| Error::External(format!("Failed to parse positions response: {}", e)))?;
+            .map_err(|e| Error::network(format!("Failed to parse positions response: {}", e)))?;
             
         Ok(positions)
     }
@@ -361,13 +362,13 @@ impl<'a> AlpacaClient<'a> {
             .header("APCA-API-SECRET-KEY", &self.api_secret)
             .send()
             .await
-            .map_err(|e| Error::External(format!("Failed to get stock quote: {}", e)))?;
+            .map_err(|e| Error::network(format!("Failed to get stock quote: {}", e)))?;
             
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await
                 .unwrap_or_else(|_| "Unable to read error response".into());
-            return Err(Error::External(format!("Alpaca API returned error {}: {}", status, text)));
+            return Err(Error::network(format!("Alpaca API returned error {}: {}", status, text)));
         }
         
         #[derive(Deserialize)]
@@ -377,7 +378,7 @@ impl<'a> AlpacaClient<'a> {
         
         let response_data: QuoteResponse = response.json()
             .await
-            .map_err(|e| Error::External(format!("Failed to parse quote response: {}", e)))?;
+            .map_err(|e| Error::network(format!("Failed to parse quote response: {}", e)))?;
             
         Ok(response_data.quote)
     }
@@ -402,13 +403,13 @@ impl<'a> AlpacaClient<'a> {
             .header("APCA-API-SECRET-KEY", &self.api_secret)
             .send()
             .await
-            .map_err(|e| Error::External(format!("Failed to get stock bars: {}", e)))?;
+            .map_err(|e| Error::network(format!("Failed to get stock bars: {}", e)))?;
             
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await
                 .unwrap_or_else(|_| "Unable to read error response".into());
-            return Err(Error::External(format!("Alpaca API returned error {}: {}", status, text)));
+            return Err(Error::network(format!("Alpaca API returned error {}: {}", status, text)));
         }
         
         #[derive(Deserialize)]
@@ -418,7 +419,7 @@ impl<'a> AlpacaClient<'a> {
         
         let response_data: BarResponse = response.json()
             .await
-            .map_err(|e| Error::External(format!("Failed to parse bars response: {}", e)))?;
+            .map_err(|e| Error::network(format!("Failed to parse bars response: {}", e)))?;
             
         Ok(response_data.bars)
     }
@@ -446,18 +447,18 @@ impl<'a> AlpacaClient<'a> {
             .header("APCA-API-SECRET-KEY", &self.api_secret)
             .send()
             .await
-            .map_err(|e| Error::External(format!("Failed to get orders: {}", e)))?;
+            .map_err(|e| Error::network(format!("Failed to get orders: {}", e)))?;
             
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await
                 .unwrap_or_else(|_| "Unable to read error response".into());
-            return Err(Error::External(format!("Alpaca API returned error {}: {}", status, text)));
+            return Err(Error::network(format!("Alpaca API returned error {}: {}", status, text)));
         }
         
         let orders: Vec<Order> = response.json()
             .await
-            .map_err(|e| Error::External(format!("Failed to parse orders response: {}", e)))?;
+            .map_err(|e| Error::network(format!("Failed to parse orders response: {}", e)))?;
             
         Ok(orders)
     }
@@ -498,18 +499,18 @@ impl<'a> AlpacaClient<'a> {
             }))
             .send()
             .await
-            .map_err(|e| Error::External(format!("Failed to place market order: {}", e)))?;
+            .map_err(|e| Error::network(format!("Failed to place market order: {}", e)))?;
             
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await
                 .unwrap_or_else(|_| "Unable to read error response".into());
-            return Err(Error::External(format!("Alpaca API returned error {}: {}", status, text)));
+            return Err(Error::network(format!("Alpaca API returned error {}: {}", status, text)));
         }
         
         let order: Order = response.json()
             .await
-            .map_err(|e| Error::External(format!("Failed to parse order response: {}", e)))?;
+            .map_err(|e| Error::network(format!("Failed to parse order response: {}", e)))?;
             
         Ok(order)
     }
@@ -534,18 +535,18 @@ impl<'a> AlpacaClient<'a> {
             }))
             .send()
             .await
-            .map_err(|e| Error::External(format!("Failed to place limit order: {}", e)))?;
+            .map_err(|e| Error::network(format!("Failed to place limit order: {}", e)))?;
             
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await
                 .unwrap_or_else(|_| "Unable to read error response".into());
-            return Err(Error::External(format!("Alpaca API returned error {}: {}", status, text)));
+            return Err(Error::network(format!("Alpaca API returned error {}: {}", status, text)));
         }
         
         let order: Order = response.json()
             .await
-            .map_err(|e| Error::External(format!("Failed to parse order response: {}", e)))?;
+            .map_err(|e| Error::network(format!("Failed to parse order response: {}", e)))?;
             
         Ok(order)
     }
@@ -562,13 +563,13 @@ impl<'a> AlpacaClient<'a> {
             .header("APCA-API-SECRET-KEY", &self.api_secret)
             .send()
             .await
-            .map_err(|e| Error::External(format!("Failed to cancel order: {}", e)))?;
+            .map_err(|e| Error::network(format!("Failed to cancel order: {}", e)))?;
             
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await
                 .unwrap_or_else(|_| "Unable to read error response".into());
-            return Err(Error::External(format!("Alpaca API returned error {}: {}", status, text)));
+            return Err(Error::network(format!("Alpaca API returned error {}: {}", status, text)));
         }
         
         Ok(())

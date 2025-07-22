@@ -3,7 +3,7 @@ use serde_json::{json, Value};
 use uuid::Uuid;
 use std::fmt;
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::Transport;
 
 /// JSON-RPC request
@@ -213,12 +213,12 @@ impl JsonRpcMessage {
                     id: id.as_ref().and_then(|i| i.as_str().map(|s| s.to_string()))
                         .unwrap_or_else(|| Uuid::new_v4().to_string()),
                     result: result.clone(),
-                    error: error.as_ref().and_then(|e| {
+                    error: error.as_ref().map(|e| {
                         let code = e.get("code").and_then(|c| c.as_i64()).unwrap_or(-32000);
                         let message = e.get("message").and_then(|m| m.as_str()).unwrap_or("Unknown error").to_string();
                         let data = e.get("data").cloned();
                         
-                        Some(JsonRpcError { code, message, data })
+                        JsonRpcError { code, message, data }
                     }),
                 }))
             },
@@ -231,7 +231,7 @@ impl JsonRpcMessage {
             },
             Message::Batch(messages) => {
                 let batch_messages = messages.iter()
-                    .map(|m| JsonRpcMessage::from_message(m))
+                    .map(JsonRpcMessage::from_message)
                     .collect::<Result<Vec<_>>>()?;
                     
                 Ok(JsonRpcMessage::Batch(batch_messages))
@@ -342,5 +342,6 @@ impl From<Message> for Value {
 
 /// Perform a request using a transport
 pub async fn perform_request<T: Transport>(transport: &mut T, method: &str, params: Option<Value>) -> Result<Value> {
-    transport.request(method, params).await.map_err(|e| e.into())
+    transport.request(method, params).await
+        .map_err(|e| Error::Transport(crate::error::TransportError::from(e)))
 }

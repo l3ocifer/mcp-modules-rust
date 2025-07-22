@@ -4,8 +4,11 @@ use serde_json::json;
 
 /// Supabase provider for database module
 pub struct SupabaseProvider {
+    #[allow(dead_code)]
     url: String,
+    #[allow(dead_code)]
     api_key: String,
+    #[allow(dead_code)]
     client: reqwest::Client,
 }
 

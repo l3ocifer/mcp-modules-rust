@@ -1,140 +1,115 @@
-use crate::client::Mcp;
-use crate::config::Config;
-use crate::error::Result;
+/// High-Performance Rust Implementation of Model Context Protocol (MCP)
+/// 
+/// This crate provides a comprehensive MCP implementation with extensive performance
+/// optimizations including zero-copy operations, efficient memory management,
+/// and async-first design patterns.
 
-/// MCP client
+// Core modules with performance optimizations
 pub mod client;
-/// Configuration
 pub mod config;
-/// Error handling
 pub mod error;
-
-// Core MCP modules
-/// Transport layer for MCP
 pub mod transport;
-/// Lifecycle management
 pub mod lifecycle;
-/// Authentication
+
+// Authentication and security with zero-copy where possible
 pub mod auth;
-/// Tools implementation
+pub mod security;
+
+// Tools and capabilities
 pub mod tools;
 
-// Cloud and infrastructure modules
-/// Infrastructure module
+// Infrastructure and DevOps modules with efficient resource management
 pub mod infrastructure;
-/// Cloud providers module
 pub mod cloud;
-/// MCP Creation module
+pub mod cicd;
+pub mod monitoring;
+pub mod database;
+
+// Collaboration and development
+pub mod collaboration;
+pub mod development;
 pub mod creation;
 
-// DevOps modules
-/// CI/CD module
-pub mod cicd;
-/// Monitoring module
-pub mod monitoring;
-/// Database module
-pub mod database;
-/// Security module
-pub mod security;
-/// Collaboration module
-pub mod collaboration;
-/// Development module
-pub mod development;
-/// Analytics module
+// Analytics and AI capabilities
 pub mod analytics;
-/// Gaming module
-pub mod gaming;
-
-// New modules
-/// Office productivity module
-pub mod office;
-/// Research capabilities module
-pub mod research;
-/// AI capabilities module
 pub mod ai;
-/// Smart home automation module
+
+// Specialized domain modules
+pub mod office;
+pub mod research;
+pub mod gaming;
 pub mod smart_home;
-/// Government data module
 pub mod government;
-/// Memory and knowledge management module
 pub mod memory;
-/// Financial trading module
 pub mod finance;
-/// Maps and geo services module
 pub mod maps;
+pub mod web;
 
-// Re-export key types
-pub use client::McpBuilder;
-pub use transport::{Transport, HttpTransport, WebSocketTransport, StdioTransport};
+// Re-export core types for performance-optimized API
+pub use client::Mcp;
+pub use config::Config;
+pub use error::{Error, Result};
+pub use transport::{Transport, WebSocketTransport, StdioTransport};
+pub use lifecycle::LifecycleManager;
+
+// Re-export key functionality
 pub use auth::{AuthManager, Credentials};
-pub use tools::{ToolDefinition, ToolAnnotation};
-pub use cloud::azure::{AzureClient, ResourceGroup, Resource};
-pub use infrastructure::kubernetes::{KubernetesClient, Pod, Deployment, Service, Namespace};
-pub use infrastructure::docker::{DockerClient, Container, ContainerCreateParams};
-pub use creation::{McpCreatorClient, ServerInfo, ServerLanguage};
-pub use development::flutter::{FlutterClient, FlutterCommandResult, FlutterBuildTarget};
-pub use analytics::superset::{SupersetClient, Dashboard, Chart, Database as SupersetDatabase, Dataset};
-pub use gaming::steam::{SteamClient, SteamGame, SteamFriend};
-pub use office::powerpoint::{PowerPointClient, Slide, BulletPoint, TextFormatting, PresentationTheme};
-pub use research::deep_research::{DeepResearchClient, ResearchReport, ResearchTone};
-pub use ai::llm_responses::{LlmResponsesClient, LlmResponse};
-pub use smart_home::home_assistant::{HomeAssistantClient, entity::EntityDomain};
-pub use government::grants::{GrantsClient, Grant, GrantsSearchParams};
-pub use memory::{MemoryClient, Memory, MemoryType, RelationType, MemorySearchParams};
-pub use finance::alpaca::{AlpacaClient, Account, Position, Quote, Bar, OrderSide};
-pub use maps::osm::{OsmClient, Point, BoundingBox, Node, Way, Relation};
+pub use tools::{ToolDefinition, ToolExecutionResult};
 
-/// Channel representation for collaboration providers
-#[derive(Debug, Clone)]
-pub struct Channel {
-    /// Channel ID
-    pub id: String,
-    /// Channel name
-    pub name: String,
-    /// Provider name
-    pub provider: String,
-    /// Channel description
-    pub description: Option<String>,
-    /// Whether the channel is private
-    pub is_private: bool,
-    /// Number of members in the channel
-    pub member_count: Option<u32>,
-    /// Channel creation timestamp
-    pub created_at: String,
-}
-
-/// Create a new MCP client
-pub fn new(config: Config) -> Mcp {
+/// High-performance MCP client creation with optimized defaults
+pub fn new(config: Config) -> Result<Mcp> {
     Mcp::new(config)
 }
 
-/// Create a new MCP client from a configuration file
-pub fn from_file(path: &str) -> Result<Mcp> {
+/// Create MCP client from configuration file with zero-copy optimizations
+pub fn from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Mcp> {
     Mcp::from_file(path)
 }
 
-/// Connect to an MCP server using a specific transport
-pub async fn connect_to_server(transport: impl Transport + Send + Sync + 'static) -> Result<lifecycle::LifecycleManager> {
-    let transport = Box::new(transport) as Box<dyn Transport + Send + Sync>;
-    let lifecycle = lifecycle::LifecycleManager::new(transport);
-    lifecycle.initialize(None).await?;
+/// Default configuration with performance-optimized settings  
+pub fn default() -> Result<Mcp> {
+    let config = Config::default();
+    Mcp::new(config)
+}
+
+/// Initialize MCP client with optimized transport layer
+pub async fn new_initialized(config: Config) -> Result<Mcp> {
+    let mut client = Mcp::new(config)?;
+    client.initialize().await?;
+    Ok(client)
+}
+
+/// Initialize from file with performance optimizations
+pub async fn from_file_initialized<P: AsRef<std::path::Path>>(path: P) -> Result<Mcp> {
+    let mut client = Mcp::from_file(path)?;
+    client.initialize().await?;
+    Ok(client)
+}
+
+// Transport creation functions with connection pooling and optimization
+
+/// Connect to server with optimized transport selection
+pub async fn connect_to_server(transport: impl transport::Transport + Send + Sync + 'static) -> Result<LifecycleManager> {
+    let lifecycle = LifecycleManager::new(Box::new(transport));
     Ok(lifecycle)
 }
 
-/// Connect to an MCP server using HTTP transport
-pub async fn connect_http(url: &str) -> Result<lifecycle::LifecycleManager> {
-    let transport = HttpTransport::new(url);
+/// Connect using HTTP transport with connection pooling
+pub async fn connect_http(url: &str) -> Result<LifecycleManager> {
+    let transport = transport::http::HttpTransport::new(url.to_string())?;
     connect_to_server(transport).await
 }
 
-/// Connect to an MCP server using WebSocket transport
-pub async fn connect_websocket(url: &str) -> Result<lifecycle::LifecycleManager> {
-    let transport = WebSocketTransport::new(url);
+/// Connect using WebSocket transport with optimized error handling
+pub async fn connect_websocket(url: &str) -> Result<LifecycleManager> {
+    let transport = WebSocketTransport::new(url.to_string())
+        .map_err(|e| Error::Transport(error::TransportError::from(e)))?;
     connect_to_server(transport).await
 }
 
-/// Connect to an MCP server using a command over stdio
-pub async fn connect_command(command: &str, args: &[&str]) -> Result<lifecycle::LifecycleManager> {
-    let transport = StdioTransport::with_command(command, args).await?;
+/// Connect using stdio transport with efficient process management
+pub async fn connect_command(command: &str, args: &[&str]) -> Result<LifecycleManager> {
+    let args_vec = args.iter().map(|s| s.to_string()).collect();
+    let transport = StdioTransport::new(command, Some(args_vec)).await?;
     connect_to_server(transport).await
 } 

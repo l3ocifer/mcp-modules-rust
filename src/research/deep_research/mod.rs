@@ -112,7 +112,7 @@ impl<'a> DeepResearchClient<'a> {
             }
         });
 
-        let response = self.lifecycle.send_request(method, Some(params)).await?;
+        let response = self.lifecycle.call_method(method, Some(params)).await?;
         let report = serde_json::from_value(response)
             .map_err(|e| Error::parsing(format!("Failed to parse research report: {}", e)))?;
         
@@ -139,7 +139,7 @@ impl<'a> DeepResearchClient<'a> {
             }
         });
 
-        let response = self.lifecycle.send_request(method, Some(params)).await?;
+        let response = self.lifecycle.call_method(method, Some(params)).await?;
         let results = serde_json::from_value(response["results"].clone())
             .map_err(|e| Error::parsing(format!("Failed to parse search results: {}", e)))?;
         
@@ -166,7 +166,7 @@ impl<'a> DeepResearchClient<'a> {
             }
         });
 
-        let response = self.lifecycle.send_request(method, Some(params)).await?;
+        let response = self.lifecycle.call_method(method, Some(params)).await?;
         let summary = response["summary"]
             .as_str()
             .ok_or_else(|| Error::parsing("Failed to parse document summary".to_string()))?
@@ -195,7 +195,7 @@ impl<'a> DeepResearchClient<'a> {
             }
         });
 
-        let response = self.lifecycle.send_request(method, Some(params)).await?;
+        let response = self.lifecycle.call_method(method, Some(params)).await?;
         let citations = serde_json::from_value(response["citations"].clone())
             .map_err(|e| Error::parsing(format!("Failed to parse citations: {}", e)))?;
         
@@ -222,7 +222,7 @@ impl<'a> DeepResearchClient<'a> {
             }
         });
 
-        let response = self.lifecycle.send_request(method, Some(params)).await?;
+        let response = self.lifecycle.call_method(method, Some(params)).await?;
         Ok(response["comparison"].clone())
     }
 
@@ -246,7 +246,7 @@ impl<'a> DeepResearchClient<'a> {
             }
         });
 
-        let response = self.lifecycle.send_request(method, Some(params)).await?;
+        let response = self.lifecycle.call_method(method, Some(params)).await?;
         let outline = serde_json::from_value(response["outline"].clone())
             .map_err(|e| Error::parsing(format!("Failed to parse outline: {}", e)))?;
         
@@ -256,29 +256,132 @@ impl<'a> DeepResearchClient<'a> {
     /// Get available tools
     pub fn get_tools(&self) -> Vec<ToolDefinition> {
         vec![
-            ToolDefinition::new(
+            ToolDefinition::from_json_schema(
                 "research",
                 "Research a topic in depth",
+                "deep_research",
+                serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "topic": {
+                            "type": "string",
+                            "description": "The research topic"
+                        },
+                        "depth": {
+                            "type": "string",
+                            "description": "Research depth level",
+                            "enum": ["basic", "intermediate", "comprehensive"]
+                        }
+                    },
+                    "required": ["topic"]
+                }),
+                Some(crate::tools::ToolAnnotation::new("research").with_description("Research a topic in depth"))
             ),
-            ToolDefinition::new(
+            ToolDefinition::from_json_schema(
                 "search",
                 "Search for information on a specific topic",
+                "information_retrieval",
+                serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Search query"
+                        },
+                        "sources": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Preferred sources to search"
+                        }
+                    },
+                    "required": ["query"]
+                }),
+                Some(crate::tools::ToolAnnotation::new("search").with_description("Search for information on a specific topic"))
             ),
-            ToolDefinition::new(
+            ToolDefinition::from_json_schema(
                 "summarize",
                 "Summarize a document or research paper",
+                "content_processing",
+                serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "content": {
+                            "type": "string",
+                            "description": "Content to summarize"
+                        },
+                        "length": {
+                            "type": "string",
+                            "description": "Summary length",
+                            "enum": ["brief", "medium", "detailed"]
+                        }
+                    },
+                    "required": ["content"]
+                }),
+                Some(crate::tools::ToolAnnotation::new("content_processing").with_description("Summarize a document or research paper"))
             ),
-            ToolDefinition::new(
+            ToolDefinition::from_json_schema(
                 "find_citations",
                 "Find citations for a research topic",
+                "academic_research",
+                serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "topic": {
+                            "type": "string",
+                            "description": "Research topic to find citations for"
+                        },
+                        "citation_style": {
+                            "type": "string",
+                            "description": "Citation style",
+                            "enum": ["APA", "MLA", "Chicago", "IEEE"]
+                        }
+                    },
+                    "required": ["topic"]
+                }),
+                Some(crate::tools::ToolAnnotation::new("academic_research").with_description("Find citations for a research topic"))
             ),
-            ToolDefinition::new(
+            ToolDefinition::from_json_schema(
                 "compare_topics",
                 "Compare multiple topics or research areas",
+                "comparative_analysis",
+                serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "topics": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Topics to compare"
+                        },
+                        "comparison_aspects": {
+                            "type": "array",
+                            "items": {"type": "string"},
+                            "description": "Aspects to compare"
+                        }
+                    },
+                    "required": ["topics"]
+                }),
+                Some(crate::tools::ToolAnnotation::new("comparative_analysis").with_description("Compare multiple topics or research areas"))
             ),
-            ToolDefinition::new(
+            ToolDefinition::from_json_schema(
                 "generate_outline",
                 "Generate a detailed research outline",
+                "content_planning",
+                serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "topic": {
+                            "type": "string",
+                            "description": "Research topic"
+                        },
+                        "outline_type": {
+                            "type": "string",
+                            "description": "Type of outline",
+                            "enum": ["thesis", "report", "presentation", "article"]
+                        }
+                    },
+                    "required": ["topic"]
+                }),
+                Some(crate::tools::ToolAnnotation::new("content_planning").with_description("Generate a detailed research outline"))
             ),
         ]
     }

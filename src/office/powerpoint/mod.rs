@@ -161,7 +161,7 @@ impl<'a> PowerPointClient<'a> {
             }
         });
 
-        let response = self.lifecycle.send_request(method, Some(params)).await?;
+        let response = self.lifecycle.call_method(method, Some(params)).await?;
         let presentation_id = response["presentation_id"]
             .as_str()
             .ok_or_else(|| Error::parsing("Failed to parse presentation ID"))?
@@ -209,7 +209,7 @@ impl<'a> PowerPointClient<'a> {
             "args": args
         });
 
-        let response = self.lifecycle.send_request(method, Some(params)).await?;
+        let response = self.lifecycle.call_method(method, Some(params)).await?;
         let slide_id = response["slide_id"]
             .as_u64()
             .ok_or_else(|| Error::parsing("Failed to parse slide ID"))?;
@@ -252,7 +252,7 @@ impl<'a> PowerPointClient<'a> {
             "args": args
         });
 
-        self.lifecycle.send_request(method, Some(params)).await?;
+        self.lifecycle.call_method(method, Some(params)).await?;
         Ok(())
     }
 
@@ -267,7 +267,7 @@ impl<'a> PowerPointClient<'a> {
             }
         });
 
-        self.lifecycle.send_request(method, Some(params)).await?;
+        self.lifecycle.call_method(method, Some(params)).await?;
         Ok(())
     }
 
@@ -282,7 +282,7 @@ impl<'a> PowerPointClient<'a> {
             }
         });
 
-        self.lifecycle.send_request(method, Some(params)).await?;
+        self.lifecycle.call_method(method, Some(params)).await?;
         Ok(())
     }
 
@@ -296,7 +296,7 @@ impl<'a> PowerPointClient<'a> {
             }
         });
 
-        let response = self.lifecycle.send_request(method, Some(params)).await?;
+        let response = self.lifecycle.call_method(method, Some(params)).await?;
         let slides = serde_json::from_value(response["slides"].clone())
             .map_err(|e| Error::parsing(format!("Failed to parse slides: {}", e)))?;
 
@@ -314,7 +314,7 @@ impl<'a> PowerPointClient<'a> {
             }
         });
 
-        self.lifecycle.send_request(method, Some(params)).await?;
+        self.lifecycle.call_method(method, Some(params)).await?;
         Ok(())
     }
 
@@ -328,7 +328,7 @@ impl<'a> PowerPointClient<'a> {
             }
         });
 
-        let response = self.lifecycle.send_request(method, Some(params)).await?;
+        let response = self.lifecycle.call_method(method, Some(params)).await?;
         let presentation_id = response["presentation_id"]
             .as_str()
             .ok_or_else(|| Error::parsing("Failed to parse presentation ID"))?
@@ -349,7 +349,7 @@ impl<'a> PowerPointClient<'a> {
             }
         });
 
-        let response = self.lifecycle.send_request(method, Some(params)).await?;
+        let response = self.lifecycle.call_method(method, Some(params)).await?;
         let presentation_id = response["presentation_id"]
             .as_str()
             .ok_or_else(|| Error::parsing("Failed to parse presentation ID"))?
@@ -370,7 +370,7 @@ impl<'a> PowerPointClient<'a> {
             }
         });
 
-        self.lifecycle.send_request(method, Some(params)).await?;
+        self.lifecycle.call_method(method, Some(params)).await?;
         Ok(())
     }
 
@@ -385,7 +385,7 @@ impl<'a> PowerPointClient<'a> {
             }
         });
 
-        self.lifecycle.send_request(method, Some(params)).await?;
+        self.lifecycle.call_method(method, Some(params)).await?;
         Ok(())
     }
 
@@ -404,7 +404,7 @@ impl<'a> PowerPointClient<'a> {
                     },
                     "required": ["title"]
                 }),
-                Some(ToolAnnotation::new("presentation_creator", "Creates a new presentation"))
+                Some(ToolAnnotation::new("presentation_creator").with_description("Creates a new presentation"))
             ),
             ToolDefinition::from_json_schema(
                 "add_slide",
@@ -420,7 +420,7 @@ impl<'a> PowerPointClient<'a> {
                     },
                     "required": ["presentation_id", "title", "layout"]
                 }),
-                Some(ToolAnnotation::new("slide_manager", "Adds a slide to a presentation")),
+                Some(ToolAnnotation::new("slide_manager").with_description("Adds a slide to a presentation")),
             ),
             ToolDefinition::from_json_schema(
                 "update_slide",
@@ -437,7 +437,7 @@ impl<'a> PowerPointClient<'a> {
                     },
                     "required": ["presentation_id", "slide_id"]
                 }),
-                Some(ToolAnnotation::new("slide_manager", "Updates an existing slide")),
+                Some(ToolAnnotation::new("slide_manager").with_description("Updates an existing slide")),
             ),
             ToolDefinition::from_json_schema(
                 "delete_slide",
@@ -451,7 +451,7 @@ impl<'a> PowerPointClient<'a> {
                     },
                     "required": ["presentation_id", "slide_id"]
                 }),
-                Some(ToolAnnotation::new("slide_manager", "Deletes a slide")),
+                Some(ToolAnnotation::new("slide_manager").with_description("Deletes a slide")),
             ),
             ToolDefinition::from_json_schema(
                 "reorder_slides",
@@ -465,7 +465,7 @@ impl<'a> PowerPointClient<'a> {
                     },
                     "required": ["presentation_id", "slide_ids"]
                 }),
-                Some(ToolAnnotation::new("slide_manager", "Reorders slides in a presentation")),
+                Some(ToolAnnotation::new("slide_manager").with_description("Reorders slides in a presentation")),
             ),
             ToolDefinition::from_json_schema(
                 "get_slides",
@@ -478,7 +478,7 @@ impl<'a> PowerPointClient<'a> {
                     },
                     "required": ["presentation_id"]
                 }),
-                Some(ToolAnnotation::new("slide_manager", "Gets all slides in a presentation")),
+                Some(ToolAnnotation::new("slide_manager").with_description("Gets all slides in a presentation")),
             ),
             ToolDefinition::from_json_schema(
                 "save_presentation",
@@ -492,7 +492,7 @@ impl<'a> PowerPointClient<'a> {
                     },
                     "required": ["presentation_id", "filepath"]
                 }),
-                Some(ToolAnnotation::new("presentation_manager", "Saves a presentation to a file")),
+                Some(ToolAnnotation::new("presentation_manager").with_description("Saves a presentation to a file")),
             ),
             ToolDefinition::from_json_schema(
                 "load_presentation",
@@ -505,7 +505,7 @@ impl<'a> PowerPointClient<'a> {
                     },
                     "required": ["filepath"]
                 }),
-                Some(ToolAnnotation::new("presentation_manager", "Loads a presentation from a file")),
+                Some(ToolAnnotation::new("presentation_manager").with_description("Loads a presentation from a file")),
             ),
             ToolDefinition::from_json_schema(
                 "generate_presentation",
@@ -519,7 +519,7 @@ impl<'a> PowerPointClient<'a> {
                     },
                     "required": ["topic", "num_slides"]
                 }),
-                Some(ToolAnnotation::new("presentation_creator", "Generates a presentation using AI")),
+                Some(ToolAnnotation::new("presentation_creator").with_description("Generates a presentation using AI")),
             ),
             ToolDefinition::from_json_schema(
                 "add_image_to_slide",
@@ -534,7 +534,7 @@ impl<'a> PowerPointClient<'a> {
                     },
                     "required": ["presentation_id", "slide_id", "image"]
                 }),
-                Some(ToolAnnotation::new("slide_manager", "Adds an image to a slide")),
+                Some(ToolAnnotation::new("slide_manager").with_description("Adds an image to a slide")),
             ),
             ToolDefinition::from_json_schema(
                 "change_theme",
@@ -548,7 +548,7 @@ impl<'a> PowerPointClient<'a> {
                     },
                     "required": ["presentation_id", "theme"]
                 }),
-                Some(ToolAnnotation::new("presentation_manager", "Changes the theme of a presentation")),
+                Some(ToolAnnotation::new("presentation_manager").with_description("Changes the theme of a presentation")),
             ),
         ]
     }

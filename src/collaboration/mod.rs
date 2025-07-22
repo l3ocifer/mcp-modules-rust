@@ -4,10 +4,17 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
 
-/// Collaboration module implementation
-#[derive(Clone)]
+/// Collaboration module
 pub struct CollaborationModule {
-    lifecycle_manager: Option<Arc<LifecycleManager>>,
+    /// Lifecycle manager
+    #[allow(dead_code)]
+    lifecycle_manager: Option<Arc<crate::lifecycle::LifecycleManager>>,
+}
+
+impl Default for CollaborationModule {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl CollaborationModule {

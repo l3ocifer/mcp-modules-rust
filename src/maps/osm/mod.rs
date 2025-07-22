@@ -133,6 +133,7 @@ pub struct SqlQueryParams {
 /// Client for OpenStreetMap data
 pub struct OsmClient<'a> {
     /// Lifecycle manager
+    #[allow(dead_code)]
     lifecycle: &'a LifecycleManager,
     /// HTTP client
     client: Client,
@@ -188,90 +189,104 @@ impl<'a> OsmClient<'a> {
         self
     }
 
-    /// Query OpenStreetMap data using Overpass QL
+    /// Query OpenStreetMap data using Overpass QL with performance optimizations
     pub async fn query_overpass(&self, overpass_query: &str) -> Result<OsmQueryResult> {
         let response = self.client
             .post(&self.overpass_url)
-            .body(overpass_query.to_string())
+            .body(overpass_query.to_string()) // Convert to owned string to fix lifetime
             .send()
             .await
-            .map_err(|e| Error::External(format!("Failed to query Overpass API: {}", e)))?;
+            .map_err(|e| Error::network(format!("Failed to query Overpass API: {}", e)))?;
             
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await
                 .unwrap_or_else(|_| "Unable to read error response".into());
-            return Err(Error::External(format!("Overpass API returned error {}: {}", status, text)));
+            return Err(Error::network(format!("Overpass API returned error {}: {}", status, text)));
         }
         
         let data: Value = response.json()
             .await
-            .map_err(|e| Error::External(format!("Failed to parse Overpass response: {}", e)))?;
+            .map_err(|e| Error::parsing(format!("Failed to parse Overpass response: {}", e)))?;
             
-        // Parse elements
+        // Parse elements with pre-allocated collections
         let elements = data.get("elements")
             .and_then(|e| e.as_array())
-            .ok_or_else(|| Error::External("Invalid Overpass response format".into()))?;
+            .ok_or_else(|| Error::parsing("Invalid Overpass response format"))?;
             
-        let mut nodes = Vec::new();
-        let mut ways = Vec::new();
-        let mut relations = Vec::new();
+        // Pre-allocate vectors with estimated capacity based on element count
+        let element_count = elements.len();
+        let mut nodes = Vec::with_capacity(element_count / 2); // Estimate 50% nodes
+        let mut ways = Vec::with_capacity(element_count / 3);  // Estimate 33% ways  
+        let mut relations = Vec::with_capacity(element_count / 10); // Estimate 10% relations
         
         for element in elements {
             let element_type = element.get("type")
                 .and_then(|t| t.as_str())
-                .ok_or_else(|| Error::External("Element missing type".into()))?;
+                .ok_or_else(|| Error::parsing("Element missing type"))?;
                 
             match element_type {
                 "node" => {
                     let id = element.get("id")
                         .and_then(|id| id.as_i64())
-                        .ok_or_else(|| Error::External("Node missing ID".into()))?;
+                        .ok_or_else(|| Error::parsing("Node missing ID"))?;
                         
                     let lat = element.get("lat")
                         .and_then(|lat| lat.as_f64())
-                        .ok_or_else(|| Error::External("Node missing latitude".into()))?;
+                        .ok_or_else(|| Error::parsing("Node missing latitude"))?;
                         
                     let lon = element.get("lon")
                         .and_then(|lon| lon.as_f64())
-                        .ok_or_else(|| Error::External("Node missing longitude".into()))?;
+                        .ok_or_else(|| Error::parsing("Node missing longitude"))?;
                         
+                    // Optimize tag parsing to avoid unnecessary allocations
                     let tags = element.get("tags")
                         .and_then(|tags| tags.as_object())
                         .map(|obj| {
-                            obj.iter()
-                                .filter_map(|(k, v)| {
-                                    v.as_str().map(|s| (k.clone(), s.to_string()))
-                                })
-                                .collect()
+                            let mut tag_map = HashMap::with_capacity(obj.len());
+                            tag_map.extend(
+                                obj.iter()
+                                    .filter_map(|(k, v)| {
+                                        v.as_str().map(|s| (k.clone(), s.to_string()))
+                                    })
+                            );
+                            tag_map
                         })
-                        .unwrap_or_default();
+                        .unwrap_or_else(|| HashMap::with_capacity(0));
                         
                     nodes.push(Node { id, lat, lon, tags });
                 },
                 "way" => {
                     let id = element.get("id")
                         .and_then(|id| id.as_i64())
-                        .ok_or_else(|| Error::External("Way missing ID".into()))?;
+                        .ok_or_else(|| Error::parsing("Way missing ID"))?;
                         
                     let nodes_array = element.get("nodes")
                         .and_then(|nodes| nodes.as_array())
-                        .ok_or_else(|| Error::External("Way missing nodes".into()))?;
+                        .ok_or_else(|| Error::parsing("Way missing nodes"))?;
                         
-                    let way_nodes: Vec<i64> = nodes_array.iter()
-                        .filter_map(|n| n.as_i64())
-                        .collect();
+                    // Pre-allocate way nodes vector
+                    let mut way_nodes = Vec::with_capacity(nodes_array.len());
+                    way_nodes.extend(
+                        nodes_array
+                            .iter()
+                            .filter_map(|n| n.as_i64())
+                    );
                         
+                    // Optimize tag parsing with pre-allocation
                     let tags = element.get("tags")
                         .and_then(|tags| tags.as_object())
                         .map(|obj| {
-                            obj.iter()
-                                .filter_map(|(k, v)| {
-                                    v.as_str().map(|s| (k.clone(), s.to_string()))
-                                })
-                                .collect()
+                            let mut tag_map = HashMap::with_capacity(obj.len());
+                            tag_map.extend(
+                                obj.iter()
+                                    .filter_map(|(k, v)| {
+                                        v.as_str().map(|s| (k.clone(), s.to_string()))
+                                    })
+                            );
+                            tag_map
                         })
-                        .unwrap_or_default();
+                        .unwrap_or_else(|| HashMap::with_capacity(0));
                         
                     let is_closed = !way_nodes.is_empty() && way_nodes.first() == way_nodes.last();
                     ways.push(Way { id, nodes: way_nodes, tags, is_closed });
@@ -279,36 +294,43 @@ impl<'a> OsmClient<'a> {
                 "relation" => {
                     let id = element.get("id")
                         .and_then(|id| id.as_i64())
-                        .ok_or_else(|| Error::External("Relation missing ID".into()))?;
+                        .ok_or_else(|| Error::parsing("Relation missing ID"))?;
                         
                     let members_array = element.get("members")
                         .and_then(|members| members.as_array())
-                        .ok_or_else(|| Error::External("Relation missing members".into()))?;
+                        .ok_or_else(|| Error::parsing("Relation missing members"))?;
                         
-                    let members: Vec<RelationMember> = members_array.iter()
-                        .filter_map(|m| {
-                            let member_type = m.get("type")?.as_str()?;
-                            let ref_ = m.get("ref")?.as_i64()?;
-                            let role = m.get("role")?.as_str()?;
-                            
-                            Some(RelationMember {
-                                member_type: member_type.to_string(),
-                                ref_,
-                                role: role.to_string(),
+                    // Pre-allocate members vector
+                    let mut members = Vec::with_capacity(members_array.len());
+                    members.extend(
+                        members_array.iter()
+                            .filter_map(|m| {
+                                let member_type = m.get("type")?.as_str()?;
+                                let ref_ = m.get("ref")?.as_i64()?;
+                                let role = m.get("role")?.as_str()?;
+                                
+                                Some(RelationMember {
+                                    member_type: member_type.to_string(),
+                                    ref_,
+                                    role: role.to_string(),
+                                })
                             })
-                        })
-                        .collect();
+                    );
                         
+                    // Optimize tag parsing with pre-allocation
                     let tags = element.get("tags")
                         .and_then(|tags| tags.as_object())
                         .map(|obj| {
-                            obj.iter()
-                                .filter_map(|(k, v)| {
-                                    v.as_str().map(|s| (k.clone(), s.to_string()))
-                                })
-                                .collect()
+                            let mut tag_map = HashMap::with_capacity(obj.len());
+                            tag_map.extend(
+                                obj.iter()
+                                    .filter_map(|(k, v)| {
+                                        v.as_str().map(|s| (k.clone(), s.to_string()))
+                                    })
+                            );
+                            tag_map
                         })
-                        .unwrap_or_default();
+                        .unwrap_or_else(|| HashMap::with_capacity(0));
                         
                     relations.push(Relation { id, members, tags });
                 },
@@ -368,7 +390,7 @@ impl<'a> OsmClient<'a> {
     pub async fn get_route(&self, from: Point, to: Point, transport_mode: &str) -> Result<String> {
         // This would typically use a routing service like OSRM
         // For now, we'll return a placeholder
-        Err(Error::External(format!(
+        Err(Error::service(format!(
             "Routing functionality requires a routing service like OSRM. 
             Consider using the points ({}, {}) to ({}, {}) with mode {} 
             to query an external routing service.",
@@ -385,7 +407,7 @@ impl<'a> OsmClient<'a> {
     ) -> Result<Vec<u8>> {
         // This would typically use a service like Mapbox or OpenStreetMap tiles
         // For now, we'll return a placeholder
-        Err(Error::External(format!(
+        Err(Error::service(format!(
             "Map image generation requires a map rendering service. 
             Consider using the center point ({}, {}) with zoom level {} 
             and dimensions {}x{} to query an external map service.",

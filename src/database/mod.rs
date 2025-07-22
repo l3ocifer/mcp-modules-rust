@@ -81,9 +81,15 @@ pub struct Table {
 }
 
 /// Database module
-#[derive(Clone)]
 pub struct DatabaseModule {
-    lifecycle_manager: Option<Arc<LifecycleManager>>,
+    /// Lifecycle manager
+    lifecycle_manager: Option<Arc<crate::lifecycle::LifecycleManager>>,
+}
+
+impl Default for DatabaseModule {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl DatabaseModule {

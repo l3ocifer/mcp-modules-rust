@@ -8,7 +8,9 @@ use std::sync::Arc;
 /// CI/CD module implementation
 #[derive(Clone)]
 pub struct CicdModule {
+    #[allow(dead_code)]
     config: CicdConfig,
+    #[allow(dead_code)]
     lifecycle: Option<Arc<LifecycleManager>>,
 }
 

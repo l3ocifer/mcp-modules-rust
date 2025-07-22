@@ -134,7 +134,7 @@ impl<'a> WordClient<'a> {
             }
         });
 
-        let response = self.lifecycle.send_request(method, Some(params)).await?;
+        let response = self.lifecycle.call_method(method, Some(params)).await?;
         let document_id = response["document_id"]
             .as_str()
             .ok_or_else(|| Error::parsing("Failed to parse document ID"))?
@@ -183,7 +183,7 @@ impl<'a> WordClient<'a> {
             "args": args
         });
 
-        let response = self.lifecycle.send_request(method, Some(params)).await?;
+        let response = self.lifecycle.call_method(method, Some(params)).await?;
         let section_id = response["section_id"]
             .as_u64()
             .ok_or_else(|| Error::parsing("Failed to parse section ID"))?;
@@ -227,7 +227,7 @@ impl<'a> WordClient<'a> {
             "args": args
         });
 
-        self.lifecycle.send_request(method, Some(params)).await?;
+        self.lifecycle.call_method(method, Some(params)).await?;
         Ok(())
     }
 
@@ -242,7 +242,7 @@ impl<'a> WordClient<'a> {
             }
         });
 
-        self.lifecycle.send_request(method, Some(params)).await?;
+        self.lifecycle.call_method(method, Some(params)).await?;
         Ok(())
     }
 
@@ -256,7 +256,7 @@ impl<'a> WordClient<'a> {
             }
         });
 
-        let response = self.lifecycle.send_request(method, Some(params)).await?;
+        let response = self.lifecycle.call_method(method, Some(params)).await?;
         let sections = serde_json::from_value(response["sections"].clone())
             .map_err(|e| Error::parsing(format!("Failed to parse sections: {}", e)))?;
 
@@ -276,7 +276,7 @@ impl<'a> WordClient<'a> {
             }
         });
 
-        let response = self.lifecycle.send_request(method, Some(params)).await?;
+        let response = self.lifecycle.call_method(method, Some(params)).await?;
         let paragraph_id = response["paragraph_id"]
             .as_u64()
             .ok_or_else(|| Error::parsing("Failed to parse paragraph ID"))?;
@@ -298,7 +298,7 @@ impl<'a> WordClient<'a> {
             }
         });
 
-        let response = self.lifecycle.send_request(method, Some(params)).await?;
+        let response = self.lifecycle.call_method(method, Some(params)).await?;
         let table_id = response["table_id"]
             .as_u64()
             .ok_or_else(|| Error::parsing("Failed to parse table ID"))?;
@@ -324,7 +324,7 @@ impl<'a> WordClient<'a> {
             "args": args
         });
 
-        let response = self.lifecycle.send_request(method, Some(params)).await?;
+        let response = self.lifecycle.call_method(method, Some(params)).await?;
         let image_id = response["image_id"]
             .as_u64()
             .ok_or_else(|| Error::parsing("Failed to parse image ID"))?;
@@ -343,7 +343,7 @@ impl<'a> WordClient<'a> {
             }
         });
 
-        self.lifecycle.send_request(method, Some(params)).await?;
+        self.lifecycle.call_method(method, Some(params)).await?;
         Ok(())
     }
 
@@ -357,7 +357,7 @@ impl<'a> WordClient<'a> {
             }
         });
 
-        let response = self.lifecycle.send_request(method, Some(params)).await?;
+        let response = self.lifecycle.call_method(method, Some(params)).await?;
         let document_id = response["document_id"]
             .as_str()
             .ok_or_else(|| Error::parsing("Failed to parse document ID"))?
@@ -377,7 +377,7 @@ impl<'a> WordClient<'a> {
             }
         });
 
-        let response = self.lifecycle.send_request(method, Some(params)).await?;
+        let response = self.lifecycle.call_method(method, Some(params)).await?;
         let document_id = response["document_id"]
             .as_str()
             .ok_or_else(|| Error::parsing("Failed to parse document ID"))?
@@ -401,7 +401,7 @@ impl<'a> WordClient<'a> {
                     },
                     "required": ["title"]
                 }),
-                Some(ToolAnnotation::new("document_creator", "Creates a new document"))
+                Some(ToolAnnotation::new("document_creator").with_description("Creates a new document"))
             ),
             ToolDefinition::from_json_schema(
                 "add_section",
@@ -415,7 +415,7 @@ impl<'a> WordClient<'a> {
                     },
                     "required": ["document_id"]
                 }),
-                Some(ToolAnnotation::new("section_manager", "Adds a section to a document")),
+                Some(ToolAnnotation::new("section_manager").with_description("Adds a section to a document")),
             ),
             ToolDefinition::from_json_schema(
                 "update_section",
@@ -430,7 +430,7 @@ impl<'a> WordClient<'a> {
                     },
                     "required": ["document_id", "section_id"]
                 }),
-                Some(ToolAnnotation::new("section_manager", "Updates an existing section")),
+                Some(ToolAnnotation::new("section_manager").with_description("Updates an existing section")),
             ),
             ToolDefinition::from_json_schema(
                 "delete_section",
@@ -444,7 +444,7 @@ impl<'a> WordClient<'a> {
                     },
                     "required": ["document_id", "section_id"]
                 }),
-                Some(ToolAnnotation::new("section_manager", "Deletes a section")),
+                Some(ToolAnnotation::new("section_manager").with_description("Deletes a section")),
             ),
             ToolDefinition::from_json_schema(
                 "get_sections",
@@ -457,7 +457,7 @@ impl<'a> WordClient<'a> {
                     },
                     "required": ["document_id"]
                 }),
-                Some(ToolAnnotation::new("section_manager", "Gets all sections in a document")),
+                Some(ToolAnnotation::new("section_manager").with_description("Gets all sections in a document")),
             ),
             ToolDefinition::from_json_schema(
                 "add_paragraph",
@@ -472,7 +472,7 @@ impl<'a> WordClient<'a> {
                     },
                     "required": ["document_id", "section_id", "text"]
                 }),
-                Some(ToolAnnotation::new("content_manager", "Adds a paragraph to a section")),
+                Some(ToolAnnotation::new("content_manager").with_description("Adds a paragraph to a section")),
             ),
             ToolDefinition::from_json_schema(
                 "add_table",
@@ -488,7 +488,7 @@ impl<'a> WordClient<'a> {
                     },
                     "required": ["document_id", "section_id", "rows"]
                 }),
-                Some(ToolAnnotation::new("content_manager", "Adds a table to a section")),
+                Some(ToolAnnotation::new("content_manager").with_description("Adds a table to a section")),
             ),
             ToolDefinition::from_json_schema(
                 "add_image",
@@ -504,7 +504,7 @@ impl<'a> WordClient<'a> {
                     },
                     "required": ["document_id", "section_id", "image"]
                 }),
-                Some(ToolAnnotation::new("content_manager", "Adds an image to a section")),
+                Some(ToolAnnotation::new("content_manager").with_description("Adds an image to a section")),
             ),
             ToolDefinition::from_json_schema(
                 "save_document",
@@ -518,7 +518,7 @@ impl<'a> WordClient<'a> {
                     },
                     "required": ["document_id", "filepath"]
                 }),
-                Some(ToolAnnotation::new("document_manager", "Saves a document to a file")),
+                Some(ToolAnnotation::new("document_manager").with_description("Saves a document to a file")),
             ),
             ToolDefinition::from_json_schema(
                 "load_document",
@@ -531,7 +531,7 @@ impl<'a> WordClient<'a> {
                     },
                     "required": ["filepath"]
                 }),
-                Some(ToolAnnotation::new("document_manager", "Loads a document from a file")),
+                Some(ToolAnnotation::new("document_manager").with_description("Loads a document from a file")),
             ),
             ToolDefinition::from_json_schema(
                 "generate_document",
@@ -545,7 +545,7 @@ impl<'a> WordClient<'a> {
                     },
                     "required": ["topic", "length"]
                 }),
-                Some(ToolAnnotation::new("document_creator", "Generates a document using AI")),
+                Some(ToolAnnotation::new("document_creator").with_description("Generates a document using AI")),
             ),
         ]
     }

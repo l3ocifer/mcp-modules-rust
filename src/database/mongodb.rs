@@ -4,7 +4,9 @@ use serde_json::json;
 
 /// MongoDB provider for database module
 pub struct MongoDBProvider {
+    #[allow(dead_code)]
     connection_string: String,
+    #[allow(dead_code)]
     client: reqwest::Client,
 }
 

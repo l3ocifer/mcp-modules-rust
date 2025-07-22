@@ -1,312 +1,474 @@
-use crate::error::Result;
-use crate::auth::{AuthError, AuthProvider, AuthResultData, OAuthConfig, Credentials};
-use oauth2::{
-    AuthUrl, TokenUrl, ClientId, ClientSecret, RedirectUrl,
-    AuthorizationCode, CsrfToken,
-    basic::BasicClient, reqwest::async_http_client, TokenType,
-    EmptyExtraTokenFields, StandardTokenResponse,
-    Scope, TokenResponse,
-};
-use std::sync::Arc;
-use std::time::{SystemTime, Duration};
+use crate::error::{Error, Result};
 use serde::{Deserialize, Serialize};
-use tokio::sync::Mutex as TokioMutex;
-use async_trait::async_trait;
+use serde_json::Value;
+use oauth2::{
+    ClientId, RedirectUrl, Scope, TokenUrl,
+    AuthUrl, CsrfToken, PkceCodeChallenge, PkceCodeVerifier,
+    TokenResponse, AccessToken, RefreshToken, AuthorizationCode,
+    StandardRevocableToken, ConfigurationError,
+    basic::BasicClient,
+};
 
-// Add missing http_client module for native client
-mod http_client {
-    pub fn native() -> impl Fn(oauth2::HttpRequest) -> Result<oauth2::HttpResponse, oauth2::reqwest::Error<reqwest::Error>> {
-        oauth2::reqwest::http_client
-    }
+// Type alias for the fully configured OAuth client
+type ConfiguredOAuthClient = oauth2::Client<
+    oauth2::StandardErrorResponse<oauth2::basic::BasicErrorResponseType>,
+    oauth2::StandardTokenResponse<oauth2::EmptyExtraTokenFields, oauth2::basic::BasicTokenType>,
+    oauth2::StandardTokenIntrospectionResponse<oauth2::EmptyExtraTokenFields, oauth2::basic::BasicTokenType>,
+    oauth2::StandardRevocableToken,
+    oauth2::StandardErrorResponse<oauth2::RevocationErrorResponseType>,
+    oauth2::EndpointSet,
+    oauth2::EndpointNotSet,
+    oauth2::EndpointNotSet,
+    oauth2::EndpointSet,
+    oauth2::EndpointSet,
+>;
+use reqwest::Client as HttpClient;
+use std::collections::HashMap;
+use std::time::{Duration, SystemTime};
+use url::Url;
+
+/// OAuth 2.1 client with MCP 2025-06-18 enhancements
+#[derive(Debug)]
+pub struct OAuth21Client {
+    /// Base URL for the authorization server
+    auth_base_url: String,
+    /// HTTP client for requests
+    #[allow(dead_code)]
+    http_client: HttpClient,
+    /// OAuth2 client
+    oauth_client: Option<ConfiguredOAuthClient>,
+    /// PKCE code verifier
+    pkce_verifier: Option<PkceCodeVerifier>,
+    /// Current access token
+    access_token: Option<AccessToken>,
+    /// Current refresh token
+    refresh_token: Option<RefreshToken>,
+    /// Token expiration time
+    token_expires_at: Option<SystemTime>,
+    /// Authorization server metadata
+    server_metadata: Option<AuthServerMetadata>,
+    /// Dynamic client registration data
+    client_registration: Option<ClientRegistration>,
 }
 
-/// OAuth token details
+/// OAuth 2.0 Authorization Server Metadata (RFC 8414)
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OAuthToken {
-    /// Access token
-    pub access_token: String,
-    /// Token type (e.g., "Bearer")
-    pub token_type: String,
-    /// Expiration time (seconds from creation)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub expires_in: Option<u64>,
-    /// Refresh token
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub refresh_token: Option<String>,
-    /// Scopes
-    #[serde(skip_serializing_if = "Option::is_none")]
+pub struct AuthServerMetadata {
+    /// Authorization server issuer identifier
+    pub issuer: String,
+    /// Authorization endpoint URL
+    pub authorization_endpoint: String,
+    /// Token endpoint URL
+    pub token_endpoint: String,
+    /// Client registration endpoint URL (RFC 7591)
+    pub registration_endpoint: Option<String>,
+    /// Revocation endpoint URL
+    pub revocation_endpoint: Option<String>,
+    /// Supported response types
+    pub response_types_supported: Vec<String>,
+    /// Supported grant types
+    pub grant_types_supported: Option<Vec<String>>,
+    /// Supported scopes
+    pub scopes_supported: Option<Vec<String>>,
+    /// Supported token endpoint auth methods
+    pub token_endpoint_auth_methods_supported: Option<Vec<String>>,
+    /// Whether PKCE is required
+    pub require_request_uri_registration: Option<bool>,
+    /// Code challenge methods supported
+    pub code_challenge_methods_supported: Option<Vec<String>>,
+}
+
+/// Dynamic Client Registration Request (RFC 7591)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClientRegistrationRequest {
+    /// Redirect URIs
+    pub redirect_uris: Vec<String>,
+    /// Client name
+    pub client_name: Option<String>,
+    /// Client URI
+    pub client_uri: Option<String>,
+    /// Logo URI
+    pub logo_uri: Option<String>,
+    /// Scope string
     pub scope: Option<String>,
-    /// Creation time (as unix timestamp)
-    pub created_at: SystemTime,
+    /// Contacts
+    pub contacts: Option<Vec<String>>,
+    /// Terms of service URI
+    pub tos_uri: Option<String>,
+    /// Policy URI
+    pub policy_uri: Option<String>,
+    /// Software ID
+    pub software_id: Option<String>,
+    /// Software version
+    pub software_version: Option<String>,
+    /// Grant types
+    pub grant_types: Option<Vec<String>>,
+    /// Response types
+    pub response_types: Option<Vec<String>>,
+    /// Token endpoint auth method
+    pub token_endpoint_auth_method: Option<String>,
 }
 
-impl OAuthToken {
-    /// Creates a new OAuth token
-    pub fn new(
-        access_token: String,
-        token_type: String,
-        expires_in: Option<u64>,
-        refresh_token: Option<String>,
-        scope: Option<String>,
-    ) -> Self {
+/// Dynamic Client Registration Response (RFC 7591)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClientRegistration {
+    /// Client identifier
+    pub client_id: String,
+    /// Client secret (for confidential clients)
+    pub client_secret: Option<String>,
+    /// Registration access token
+    pub registration_access_token: Option<String>,
+    /// Registration client URI
+    pub registration_client_uri: Option<String>,
+    /// Client secret expires at
+    pub client_secret_expires_at: Option<u64>,
+    /// All other registration data
+    #[serde(flatten)]
+    pub data: HashMap<String, Value>,
+}
+
+/// Resource Indicator for RFC 8707 compliance
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ResourceIndicator {
+    /// Resource server identifier
+    pub resource: String,
+    /// Optional audience
+    pub audience: Option<Vec<String>>,
+}
+
+impl OAuth21Client {
+    /// Create a new OAuth 2.1 client
+    pub fn new(auth_base_url: &str) -> Self {
         Self {
-            access_token,
-            token_type,
-            expires_in,
-            refresh_token,
-            scope,
-            created_at: SystemTime::now(),
+            auth_base_url: auth_base_url.to_string(),
+            http_client: HttpClient::new(),
+            oauth_client: None,
+            pkce_verifier: None,
+            access_token: None,
+            refresh_token: None,
+            token_expires_at: None,
+            server_metadata: None,
+            client_registration: None,
         }
     }
 
-    /// Create a new OAuth token from a standard token response
-    pub fn from_response<T: TokenType + AsRef<str>>(
-        response: StandardTokenResponse<EmptyExtraTokenFields, T>
-    ) -> Self {
-        Self {
-            access_token: response.access_token().secret().to_string(),
-            token_type: response.token_type().as_ref().to_string(),
-            expires_in: response.expires_in().map(|e| e.as_secs()),
-            refresh_token: response.refresh_token().map(|r| r.secret().to_string()),
-            scope: response.scopes().map(|s| s.iter().map(|scope| scope.to_string()).collect::<Vec<_>>().join(" ")),
-            created_at: SystemTime::now(),
-        }
-    }
-
-    /// Checks if the token is expired
-    pub fn is_expired(&self) -> bool {
-        if let Some(expires_in) = self.expires_in {
-            let expiry_time = self.created_at + Duration::from_secs(expires_in);
-            SystemTime::now() > expiry_time
-        } else {
-            false
-        }
-    }
-    
-    /// Get authorization header value
-    pub fn authorization_header(&self) -> String {
-        format!("{} {}", self.token_type, self.access_token)
-    }
-}
-
-/// OAuth client implementation
-pub struct OAuthClient {
-    /// OAuth configuration
-    config: OAuthConfig,
-    /// Current token
-    token: Arc<TokioMutex<Option<OAuthToken>>>,
-    /// HTTP client
-    http_client: reqwest::Client,
-}
-
-impl OAuthClient {
-    /// Create a new OAuth client
-    pub fn new(config: OAuthConfig) -> Result<Self> {
-        let client_id = config.client_id.clone();
-        let client_secret = config.client_secret.clone();
-        let redirect_url = config.redirect_url.clone();
+    /// Discover authorization server metadata (RFC 8414)
+    pub async fn discover_metadata(&mut self) -> Result<()> {
+        let well_known_url = format!("{}/.well-known/oauth-authorization-server", self.auth_base_url);
         
-        let _client = BasicClient::new(
-            ClientId::new(client_id),
-            Some(ClientSecret::new(client_secret.unwrap_or_default())),
-            AuthUrl::new(config.auth_url.clone())
-                .map_err(|_| AuthError::InvalidAuthUrl)?,
-            Some(TokenUrl::new(config.token_url.clone())
-                .map_err(|_| AuthError::InvalidTokenUrl)?),
-        )
-        .set_redirect_uri(RedirectUrl::new(redirect_url).map_err(|_| AuthError::InvalidRedirectUri)?);
+        let response = self.http_client
+            .get(&well_known_url)
+            .header("MCP-Protocol-Version", "2025-06-18")
+            .send()
+            .await
+            .map_err(|e| Error::network(format!("Failed to fetch metadata: {}", e)))?;
 
-        Ok(Self {
-            config,
-            token: Arc::new(TokioMutex::new(None)),
-            http_client: reqwest::Client::new(),
+        if response.status().is_success() {
+            let metadata: AuthServerMetadata = response
+                .json()
+                .await
+                .map_err(|e| Error::parsing(format!("Failed to parse metadata: {}", e)))?;
+                
+            self.server_metadata = Some(metadata);
+            Ok(())
+        } else {
+            // Fallback to default endpoints
+            self.server_metadata = Some(AuthServerMetadata {
+                issuer: self.auth_base_url.clone(),
+                authorization_endpoint: format!("{}/authorize", self.auth_base_url),
+                token_endpoint: format!("{}/token", self.auth_base_url),
+                registration_endpoint: Some(format!("{}/register", self.auth_base_url)),
+                revocation_endpoint: Some(format!("{}/revoke", self.auth_base_url)),
+                response_types_supported: vec!["code".to_string()],
+                grant_types_supported: Some(vec!["authorization_code".to_string(), "refresh_token".to_string()]),
+                scopes_supported: Some(vec!["openid".to_string(), "mcp".to_string()]),
+                token_endpoint_auth_methods_supported: Some(vec!["none".to_string(), "client_secret_basic".to_string()]),
+                require_request_uri_registration: Some(false),
+                code_challenge_methods_supported: Some(vec!["S256".to_string()]),
+            });
+            Ok(())
+        }
+    }
+
+    /// Register client dynamically (RFC 7591)
+    pub async fn register_client(&mut self, registration_request: ClientRegistrationRequest) -> Result<()> {
+        let _metadata = self.server_metadata.as_ref()
+            .ok_or_else(|| Error::auth("Server metadata not available".to_string()))?;
+
+        let registration_endpoint = self.server_metadata.as_ref()
+            .and_then(|m| m.registration_endpoint.as_ref())
+            .ok_or_else(|| Error::auth("Registration endpoint not available".to_string()))?;
+
+        let response = self.http_client
+            .post(registration_endpoint)
+            .header("Content-Type", "application/json")
+            .json(&registration_request)
+            .send()
+            .await
+            .map_err(|e| Error::network(format!("Registration request failed: {}", e)))?;
+
+        if response.status().is_success() {
+            let registration: ClientRegistration = response
+                .json()
+                .await
+                .map_err(|e| Error::parsing(format!("Failed to parse registration response: {}", e)))?;
+            
+            self.client_registration = Some(registration);
+            Ok(())
+        } else {
+            let error_text = response.text().await.unwrap_or_default();
+            Err(Error::auth(format!("Client registration failed: {}", error_text)))
+        }
+    }
+
+    /// Initialize OAuth client with discovered metadata and registered client
+    pub fn init_oauth_client(&mut self) -> Result<()> {
+        let _metadata = self.server_metadata.as_ref()
+            .ok_or_else(|| Error::auth("Server metadata not available".to_string()))?;
+            
+        let registration = self.client_registration.as_ref()
+            .ok_or_else(|| Error::auth("Client not registered".to_string()))?;
+
+        // Create OAuth client with proper endpoint configuration
+        let client_id = ClientId::new(registration.client_id.clone());
+        let auth_url = AuthUrl::new(self.auth_base_url.clone())
+            .map_err(|e| Error::config(format!("Invalid auth URL: {}", e)))?;
+        let token_url = TokenUrl::new(self.auth_base_url.clone())
+            .map_err(|e| Error::config(format!("Invalid token URL: {}", e)))?;
+        
+        // Add a default revocation URL for the type system
+        let revocation_url = oauth2::RevocationUrl::new(format!("{}/revoke", self.auth_base_url))
+            .map_err(|e| Error::config(format!("Invalid revocation URL: {}", e)))?;
+
+        // Build client with all required endpoints to match the type
+        let client: ConfiguredOAuthClient = BasicClient::new(client_id)
+            .set_auth_uri(auth_url)
+            .set_token_uri(token_url)
+            .set_revocation_url(revocation_url);
+
+        // Store the configured client
+        self.oauth_client = Some(client);
+        Ok(())
+    }
+
+    /// Start authorization flow with PKCE and resource indicators
+    pub fn start_authorization_flow(
+        &mut self,
+        redirect_uri: &str,
+        scopes: Vec<String>,
+        resource_indicators: Option<Vec<ResourceIndicator>>,
+    ) -> Result<String> {
+        let client = self.oauth_client.as_ref()
+            .ok_or_else(|| Error::auth("OAuth client not initialized".to_string()))?;
+
+        // Generate PKCE challenge
+        let (pkce_challenge, pkce_verifier) = PkceCodeChallenge::new_random_sha256();
+        self.pkce_verifier = Some(pkce_verifier);
+
+        let _redirect_url = RedirectUrl::new(redirect_uri.to_string())
+            .map_err(|e| Error::auth(format!("Invalid redirect URL: {}", e)))?;
+
+        let mut auth_request = client
+            .authorize_url(CsrfToken::new_random)
+            .set_pkce_challenge(pkce_challenge);
+
+        // Add scopes
+        for scope in scopes {
+            auth_request = auth_request.add_scope(Scope::new(scope));
+        }
+
+        let (auth_url, _csrf_token) = auth_request.url();
+        
+        // Add resource indicators as query parameters if provided (RFC 8707)
+        let mut final_url = auth_url;
+        if let Some(indicators) = resource_indicators {
+            let mut url = Url::parse(final_url.as_ref())
+                .map_err(|e| Error::auth(format!("Invalid URL: {}", e)))?;
+            
+            for indicator in indicators {
+                url.query_pairs_mut().append_pair("resource", &indicator.resource);
+                if let Some(audience) = indicator.audience {
+                    for aud in audience {
+                        url.query_pairs_mut().append_pair("audience", &aud);
+                    }
+                }
+            }
+            final_url = url;
+        }
+
+        Ok(final_url.to_string())
+    }
+
+    /// Exchange authorization code for access token
+    pub async fn exchange_code(&mut self, code: String, resource_indicators: Option<Vec<ResourceIndicator>>) -> Result<OAuthToken> {
+        let client = self.oauth_client.as_ref()
+            .ok_or_else(|| Error::auth("OAuth client not initialized".to_string()))?;
+
+        let pkce_verifier = self.pkce_verifier.take()
+            .ok_or_else(|| Error::auth("PKCE verifier not found".to_string()))?;
+
+        let mut token_request = client
+            .exchange_code(AuthorizationCode::new(code))
+            .set_pkce_verifier(pkce_verifier);
+
+        // Add resource indicators if provided (RFC 8707)
+        if let Some(indicators) = resource_indicators {
+            for indicator in indicators {
+                token_request = token_request.add_extra_param("resource", indicator.resource);
+                if let Some(audience) = indicator.audience {
+                    for aud in audience {
+                        token_request = token_request.add_extra_param("audience", aud);
+                    }
+                }
+            }
+        }
+
+        // Create HTTP client for token exchange
+        let http_client = reqwest::ClientBuilder::new()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|e| Error::auth(format!("Failed to create HTTP client: {}", e)))?;
+
+        let token_response = token_request
+            .request_async(&http_client)
+            .await
+            .map_err(|e| Error::auth(format!("Token exchange failed: {}", e)))?;
+
+        // Store tokens
+        self.access_token = Some(token_response.access_token().clone());
+        self.refresh_token = token_response.refresh_token().cloned();
+        
+        // Calculate expiration time
+        self.token_expires_at = token_response.expires_in().map(|duration| {
+            SystemTime::now() + duration
+        });
+
+        Ok(OAuthToken {
+            access_token: token_response.access_token().secret().clone(),
+            refresh_token: token_response.refresh_token().map(|t| t.secret().clone()),
+            expires_in: token_response.expires_in().map(|d| d.as_secs()),
+            token_type: "Bearer".to_string(),
+            scope: None, // Could be extracted from response if needed
         })
     }
-    
-    /// Gets the authorization URL for the OAuth2 flow
-    pub async fn authorize_url(&self, csrf_state: CsrfToken) -> (reqwest::Url, CsrfToken) {
-        // Create the OAuth client
-        let client = self.create_oauth_client().expect("Failed to create OAuth client");
-        
-        // Start the authorization process
-        let mut auth_request = client.authorize_url(|| csrf_state.clone());
-        
-        // Add scopes if configured
-        if !self.config.scopes.is_empty() {
-            for scope in &self.config.scopes {
-                auth_request = auth_request.add_scope(Scope::new(scope.clone()));
-            }
+
+    /// Refresh access token
+    pub async fn refresh_token(&mut self) -> Result<OAuthToken> {
+        let client = self.oauth_client.as_ref()
+            .ok_or_else(|| Error::auth("OAuth client not initialized".to_string()))?;
+
+        let refresh_token = self.refresh_token.as_ref()
+            .ok_or_else(|| Error::auth("No refresh token available".to_string()))?;
+
+        // Create HTTP client for token refresh
+        let http_client = reqwest::ClientBuilder::new()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|e| Error::auth(format!("Failed to create HTTP client: {}", e)))?;
+
+        let token_response = client
+            .exchange_refresh_token(refresh_token)
+            .request_async(&http_client)
+            .await
+            .map_err(|e| Error::auth(format!("Token refresh failed: {}", e)))?;
+
+        // Update stored tokens
+        self.access_token = Some(token_response.access_token().clone());
+        if let Some(new_refresh_token) = token_response.refresh_token() {
+            self.refresh_token = Some(new_refresh_token.clone());
         }
         
-        // Get the URL and CSRF token
-        let (auth_url, csrf_token) = auth_request.url();
-        
-        (auth_url, csrf_token)
-    }
-    
-    /// Exchange an authorization code for an access token (async version)
-    pub async fn exchange_code(&self, code: String) -> Result<OAuthToken> {
-        // Create a CSRF token (not validated in this flow as we're handling the code directly)
-        let csrf_token = CsrfToken::new_random();
-        
-        // Exchange the code for a token
-        let token_response = self
-            .create_oauth_client()?
-            .exchange_code(AuthorizationCode::new(code))
-            .request_async(async_http_client)
-            .await
-            .map_err(|e| AuthError::TokenExchangeError(e.to_string()))?;
+        // Update expiration time
+        self.token_expires_at = token_response.expires_in().map(|duration| {
+            SystemTime::now() + duration
+        });
 
-        let token = OAuthToken::from_response(token_response);
-        *self.token.lock().await = Some(token.clone());
-        
-        Ok(token)
+        Ok(OAuthToken {
+            access_token: token_response.access_token().secret().clone(),
+            refresh_token: token_response.refresh_token().map(|t| t.secret().clone()),
+            expires_in: token_response.expires_in().map(|d| d.as_secs()),
+            token_type: "Bearer".to_string(),
+            scope: None,
+        })
     }
-    
-    /// Refresh an access token using a refresh token
-    pub async fn refresh_token(&self, refresh_token: String) -> Result<OAuthToken> {
-        let token_result = self
-            .create_oauth_client()?
-            .exchange_refresh_token(&oauth2::RefreshToken::new(refresh_token))
-            .request_async(async_http_client)
-            .await
-            .map_err(|e| AuthError::TokenRefreshError(e.to_string()))?;
 
-        let token = OAuthToken::from_response(token_result);
-        *self.token.lock().await = Some(token.clone());
-        
-        Ok(token)
-    }
-    
-    /// Checks if the token is expired
-    pub async fn is_token_expired(&self) -> bool {
-        if let Some(token) = self.token.lock().await.as_ref() {
-            token.is_expired()
+    /// Check if token is valid and not expired
+    pub fn is_token_valid(&self) -> bool {
+        if self.access_token.is_none() {
+            return false;
+        }
+
+        if let Some(expires_at) = self.token_expires_at {
+            // Add 60 second buffer for clock skew
+            SystemTime::now() + Duration::from_secs(60) < expires_at
         } else {
-            false
+            // If no expiration is set, assume token is valid
+            true
         }
     }
 
-    /// Gets the current token, refreshing it if expired
-    pub async fn get_token(&self) -> Result<OAuthToken> {
-        let token_guard = self.token.lock().await;
-        
-        // Check if we have a token
-        if let Some(token) = token_guard.as_ref() {
-            // If token is expired, try to refresh it
-            if self.is_token_expired().await {
-                // Check if we have a refresh token
-                if let Some(refresh_token) = &token.refresh_token {
-                    // Clone the refresh token before dropping the guard
-                    let refresh_token = refresh_token.clone();
-                    // Release the lock before async operation
-                    drop(token_guard);
-                    
-                    // Refresh the token
-                    return self.refresh_token(refresh_token).await;
-                } else {
-                    return Err(AuthError::NoRefreshToken.into());
-                }
-            }
+    /// Get current access token
+    pub fn get_access_token(&self) -> Option<&AccessToken> {
+        self.access_token.as_ref()
+    }
+
+    /// Revoke token
+    pub async fn revoke_token(&mut self) -> Result<()> {
+        let client = self.oauth_client.as_ref()
+            .ok_or_else(|| Error::auth("OAuth client not initialized".to_string()))?;
+
+        if let Some(access_token) = &self.access_token {
+            let revocable_token = StandardRevocableToken::AccessToken(access_token.clone());
             
-            // Return the token if it's not expired
-            Ok(token.clone())
-        } else {
-            Err(AuthError::NoToken.into())
-        }
-    }
-    
-    fn create_oauth_client(&self) -> Result<BasicClient> {
-        let client = BasicClient::new(
-            ClientId::new(self.config.client_id.clone()),
-            self.config.client_secret.as_ref().map(|s| ClientSecret::new(s.clone())),
-            AuthUrl::new(self.config.auth_url.clone())
-                .map_err(|_| AuthError::InvalidAuthUrl)?,
-            Some(TokenUrl::new(self.config.token_url.clone())
-                .map_err(|_| AuthError::InvalidTokenUrl)?),
-        )
-        .set_redirect_uri(RedirectUrl::new(self.config.redirect_url.clone())
-            .map_err(|_| AuthError::InvalidRedirectUri)?);
-        
-        Ok(client)
-    }
+            // Create HTTP client for token revocation
+            let http_client = reqwest::ClientBuilder::new()
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .map_err(|e| Error::auth(format!("Failed to create HTTP client: {}", e)))?;
 
-    async fn get_auth_url(&self) -> Result<String> {
-        let csrf_token = CsrfToken::new_random();
-        let (auth_url, _) = self.authorize_url(csrf_token.clone()).await;
-        
-        Ok(auth_url.to_string())
+            client
+                .revoke_token(revocable_token)
+                .map_err(|e: ConfigurationError| Error::auth(format!("Token revocation not supported: {}", e)))?
+                .request_async(&http_client)
+                .await
+                .map_err(|e| Error::auth(format!("Token revocation failed: {}", e)))?;
+
+            self.access_token = None;
+            self.refresh_token = None;
+            self.token_expires_at = None;
+        }
+
+        Ok(())
     }
 }
 
-#[async_trait]
-impl AuthProvider for OAuthClient {
-    async fn authenticate(&self) -> Result<AuthResultData<Credentials>> {
-        if let Some(token) = &*self.token.lock().await {
-            if !self.is_token_expired().await {
-                let credentials = Credentials {
-                    token: token.access_token.clone(),
-                    token_type: token.token_type.clone(),
-                    expires_in: token.expires_in,
-                    refresh_token: token.refresh_token.clone(),
-                    scope: token.scope.clone(),
-                };
-                return Ok(AuthResultData::Authenticated(credentials));
-            }
-            
-            if let Some(refresh_token) = &token.refresh_token {
-                match self.refresh_token(refresh_token.clone()).await {
-                    Ok(new_token) => {
-                        let credentials = Credentials {
-                            token: new_token.access_token.clone(),
-                            token_type: new_token.token_type.clone(),
-                            expires_in: new_token.expires_in,
-                            refresh_token: new_token.refresh_token.clone(),
-                            scope: new_token.scope.clone(),
-                        };
-                        return Ok(AuthResultData::Authenticated(credentials));
-                    },
-                    Err(e) => return Ok(AuthResultData::Error(e.to_string())),
-                }
-            }
+/// OAuth token information
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OAuthToken {
+    pub access_token: String,
+    pub refresh_token: Option<String>,
+    pub expires_in: Option<u64>,
+    pub token_type: String,
+    pub scope: Option<String>,
+}
+
+/// Default client registration for MCP
+impl Default for ClientRegistrationRequest {
+    fn default() -> Self {
+        Self {
+            redirect_uris: vec!["http://localhost:8080/callback".to_string()],
+            client_name: Some("MCP Client".to_string()),
+            client_uri: Some("https://modelcontextprotocol.io".to_string()),
+            logo_uri: None,
+            scope: Some("mcp".to_string()),
+            contacts: None,
+            tos_uri: None,
+            policy_uri: None,
+            software_id: Some("mcp-client".to_string()),
+            software_version: Some("2025-06-18".to_string()),
+            grant_types: Some(vec!["authorization_code".to_string(), "refresh_token".to_string()]),
+            response_types: Some(vec!["code".to_string()]),
+            token_endpoint_auth_method: Some("none".to_string()), // Public client
         }
-        
-        // Create a random CSRF token
-        let csrf_token = CsrfToken::new_random();
-        let (auth_url, _) = self.authorize_url(csrf_token.clone()).await;
-        Ok(AuthResultData::NeedsAuthorization(auth_url.to_string()))
-    }
-    
-    async fn handle_authorization_code(&self, code: &str) -> Result<AuthResultData<Credentials>> {
-        match self.exchange_code(code.to_string()).await {
-            Ok(token) => {
-                let credentials = Credentials {
-                    token: token.access_token,
-                    token_type: token.token_type,
-                    expires_in: token.expires_in,
-                    refresh_token: token.refresh_token,
-                    scope: token.scope,
-                };
-                
-                Ok(AuthResultData::Authenticated(credentials))
-            },
-            Err(_) => {
-                // If exchange fails, generate new auth URL
-                let csrf_token = CsrfToken::new_random();
-                let (auth_url, _) = self.authorize_url(csrf_token.clone()).await;
-                
-                Ok(AuthResultData::NeedsAuthorization(auth_url.to_string()))
-            }
-        }
-    }
-    
-    async fn get_auth_header(&self) -> Result<String> {
-        let token = self.get_token().await?;
-        Ok(token.authorization_header())
-    }
-    
-    /// Get the provider type
-    fn provider_type(&self) -> crate::auth::AuthProviderType {
-        crate::auth::AuthProviderType::OAuth
     }
 } 

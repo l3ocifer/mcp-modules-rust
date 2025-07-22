@@ -33,6 +33,7 @@ pub struct SteamFriend {
 /// Steam client for MCP
 pub struct SteamClient<'a> {
     /// Lifecycle manager
+    #[allow(dead_code)]
     lifecycle: &'a LifecycleManager,
     /// HTTP client
     client: Client,

@@ -1,8 +1,8 @@
 use crate::error::{Error, Result};
+use crate::smart_home::home_assistant::entity::EntityDomain;
 use serde_json::{json, Value};
-use super::entity::EntityDomain;
-use std::future::Future;
 use std::pin::Pin;
+use std::future::Future;
 
 /// Base trait for all Home Assistant service handlers
 pub trait ServiceHandler {
@@ -13,11 +13,8 @@ pub trait ServiceHandler {
     fn get_tools(&self) -> Vec<(String, String, Value)>;
 }
 
-/// Function type for calling Home Assistant services (async)
-pub type CallServiceFn = Box<dyn Fn(&str, &str, &Value) -> Pin<Box<dyn Future<Output = Result<Value>> + Send + 'static>> + Send + Sync>;
-
-/// Function type for getting entity state (async)
-pub type GetEntityStateFn = Box<dyn Fn(&str) -> Pin<Box<dyn Future<Output = Result<Value>> + Send + 'static>> + Send + Sync>;
+pub type CallServiceFn = Box<dyn Fn(&str, &str, Value) -> Pin<Box<dyn Future<Output = Result<Value>> + Send>> + Send + Sync>;
+pub type GetEntityStateFn = Box<dyn Fn(&str) -> Pin<Box<dyn Future<Output = Result<Value>> + Send>> + Send + Sync>;
 
 /// Light service operations
 pub struct LightService {
@@ -26,6 +23,7 @@ pub struct LightService {
     /// Call service function
     call_service: CallServiceFn,
     /// Get entity state function
+    #[allow(dead_code)]
     get_state: GetEntityStateFn,
 }
 
@@ -60,7 +58,7 @@ impl LightService {
             data["color_temp"] = json!(temp);
         }
         
-        (self.call_service)(&self.domain.to_string(), "turn_on", &data).await
+        (self.call_service)(&self.domain.to_string(), "turn_on", data).await
     }
     
     /// Turn off a light
@@ -69,7 +67,7 @@ impl LightService {
             "entity_id": entity_id
         });
         
-        (self.call_service)(&self.domain.to_string(), "turn_off", &data).await
+        (self.call_service)(&self.domain.to_string(), "turn_off", data).await
     }
 }
 
@@ -81,7 +79,7 @@ impl ServiceHandler for LightService {
     fn get_tools(&self) -> Vec<(String, String, Value)> {
         vec![
             (
-                format!("{}-turn_on", self.domain.to_string()),
+                format!("{}-turn_on", self.domain),
                 "Turn on a light with optional brightness and color settings".to_string(),
                 json!({
                     "type": "object",
@@ -118,7 +116,7 @@ impl ServiceHandler for LightService {
                 })
             ),
             (
-                format!("{}-turn_off", self.domain.to_string()),
+                format!("{}-turn_off", self.domain),
                 "Turn off a light".to_string(),
                 json!({
                     "type": "object",
@@ -142,6 +140,7 @@ pub struct ClimateService {
     /// Call service function
     call_service: CallServiceFn,
     /// Get entity state function
+    #[allow(dead_code)]
     get_state: GetEntityStateFn,
 }
 
@@ -162,7 +161,7 @@ impl ClimateService {
             "temperature": temperature
         });
         
-        (self.call_service)(&self.domain.to_string(), "set_temperature", &data).await
+        (self.call_service)(&self.domain.to_string(), "set_temperature", data).await
     }
     
     /// Set HVAC mode
@@ -172,7 +171,7 @@ impl ClimateService {
             "hvac_mode": hvac_mode
         });
         
-        (self.call_service)(&self.domain.to_string(), "set_hvac_mode", &data).await
+        (self.call_service)(&self.domain.to_string(), "set_hvac_mode", data).await
     }
 }
 
@@ -184,7 +183,7 @@ impl ServiceHandler for ClimateService {
     fn get_tools(&self) -> Vec<(String, String, Value)> {
         vec![
             (
-                format!("{}-set_temperature", self.domain.to_string()),
+                format!("{}-set_temperature", self.domain),
                 "Set target temperature for climate entity".to_string(),
                 json!({
                     "type": "object",
@@ -202,7 +201,7 @@ impl ServiceHandler for ClimateService {
                 })
             ),
             (
-                format!("{}-set_hvac_mode", self.domain.to_string()),
+                format!("{}-set_hvac_mode", self.domain),
                 "Set HVAC mode for climate entity".to_string(),
                 json!({
                     "type": "object",
@@ -231,6 +230,7 @@ pub struct LockService {
     /// Call service function
     call_service: CallServiceFn,
     /// Get entity state function
+    #[allow(dead_code)]
     get_state: GetEntityStateFn,
 }
 
@@ -250,7 +250,7 @@ impl LockService {
             "entity_id": entity_id
         });
         
-        (self.call_service)(&self.domain.to_string(), "lock", &data).await
+        (self.call_service)(&self.domain.to_string(), "lock", data).await
     }
     
     /// Unlock a lock
@@ -259,7 +259,7 @@ impl LockService {
             "entity_id": entity_id
         });
         
-        (self.call_service)(&self.domain.to_string(), "unlock", &data).await
+        (self.call_service)(&self.domain.to_string(), "unlock", data).await
     }
 }
 
@@ -271,7 +271,7 @@ impl ServiceHandler for LockService {
     fn get_tools(&self) -> Vec<(String, String, Value)> {
         vec![
             (
-                format!("{}-lock", self.domain.to_string()),
+                format!("{}-lock", self.domain),
                 "Lock a lock".to_string(),
                 json!({
                     "type": "object",
@@ -285,7 +285,7 @@ impl ServiceHandler for LockService {
                 })
             ),
             (
-                format!("{}-unlock", self.domain.to_string()),
+                format!("{}-unlock", self.domain),
                 "Unlock a lock".to_string(),
                 json!({
                     "type": "object",
@@ -309,6 +309,7 @@ pub struct AlarmControlPanelService {
     /// Call service function
     call_service: CallServiceFn,
     /// Get entity state function
+    #[allow(dead_code)]
     get_state: GetEntityStateFn,
 }
 
@@ -332,7 +333,7 @@ impl AlarmControlPanelService {
             data["code"] = json!(c);
         }
         
-        (self.call_service)(&self.domain.to_string(), "alarm_arm_home", &data).await
+        (self.call_service)(&self.domain.to_string(), "alarm_arm_home", data).await
     }
     
     /// Arm the alarm in away mode
@@ -345,7 +346,7 @@ impl AlarmControlPanelService {
             data["code"] = json!(c);
         }
         
-        (self.call_service)(&self.domain.to_string(), "alarm_arm_away", &data).await
+        (self.call_service)(&self.domain.to_string(), "alarm_arm_away", data).await
     }
     
     /// Arm the alarm in night mode
@@ -358,7 +359,7 @@ impl AlarmControlPanelService {
             data["code"] = json!(c);
         }
         
-        (self.call_service)(&self.domain.to_string(), "alarm_arm_night", &data).await
+        (self.call_service)(&self.domain.to_string(), "alarm_arm_night", data).await
     }
     
     /// Disarm the alarm
@@ -371,7 +372,7 @@ impl AlarmControlPanelService {
             data["code"] = json!(c);
         }
         
-        (self.call_service)(&self.domain.to_string(), "alarm_disarm", &data).await
+        (self.call_service)(&self.domain.to_string(), "alarm_disarm", data).await
     }
 }
 
@@ -383,7 +384,7 @@ impl ServiceHandler for AlarmControlPanelService {
     fn get_tools(&self) -> Vec<(String, String, Value)> {
         vec![
             (
-                format!("{}-arm_home", self.domain.to_string()),
+                format!("{}-arm_home", self.domain),
                 "Arm the alarm in home mode".to_string(),
                 json!({
                     "type": "object",
@@ -401,7 +402,7 @@ impl ServiceHandler for AlarmControlPanelService {
                 })
             ),
             (
-                format!("{}-arm_away", self.domain.to_string()),
+                format!("{}-arm_away", self.domain),
                 "Arm the alarm in away mode".to_string(),
                 json!({
                     "type": "object",
@@ -419,7 +420,7 @@ impl ServiceHandler for AlarmControlPanelService {
                 })
             ),
             (
-                format!("{}-arm_night", self.domain.to_string()),
+                format!("{}-arm_night", self.domain),
                 "Arm the alarm in night mode".to_string(),
                 json!({
                     "type": "object",
@@ -437,7 +438,7 @@ impl ServiceHandler for AlarmControlPanelService {
                 })
             ),
             (
-                format!("{}-disarm", self.domain.to_string()),
+                format!("{}-disarm", self.domain),
                 "Disarm the alarm".to_string(),
                 json!({
                     "type": "object",
@@ -465,6 +466,7 @@ pub struct HumidifierService {
     /// Call service function
     call_service: CallServiceFn,
     /// Get entity state function
+    #[allow(dead_code)]
     get_state: GetEntityStateFn,
 }
 
@@ -484,7 +486,7 @@ impl HumidifierService {
             "entity_id": entity_id
         });
         
-        (self.call_service)(&self.domain.to_string(), "turn_on", &data).await
+        (self.call_service)(&self.domain.to_string(), "turn_on", data).await
     }
     
     /// Turn off a humidifier
@@ -493,7 +495,7 @@ impl HumidifierService {
             "entity_id": entity_id
         });
         
-        (self.call_service)(&self.domain.to_string(), "turn_off", &data).await
+        (self.call_service)(&self.domain.to_string(), "turn_off", data).await
     }
     
     /// Set humidity
@@ -507,7 +509,7 @@ impl HumidifierService {
             "humidity": humidity
         });
         
-        (self.call_service)(&self.domain.to_string(), "set_humidity", &data).await
+        (self.call_service)(&self.domain.to_string(), "set_humidity", data).await
     }
     
     /// Set mode
@@ -517,7 +519,7 @@ impl HumidifierService {
             "mode": mode
         });
         
-        (self.call_service)(&self.domain.to_string(), "set_mode", &data).await
+        (self.call_service)(&self.domain.to_string(), "set_mode", data).await
     }
 }
 
@@ -529,7 +531,7 @@ impl ServiceHandler for HumidifierService {
     fn get_tools(&self) -> Vec<(String, String, Value)> {
         vec![
             (
-                format!("{}-turn_on", self.domain.to_string()),
+                format!("{}-turn_on", self.domain),
                 "Turn on a humidifier".to_string(),
                 json!({
                     "type": "object",
@@ -543,7 +545,7 @@ impl ServiceHandler for HumidifierService {
                 })
             ),
             (
-                format!("{}-turn_off", self.domain.to_string()),
+                format!("{}-turn_off", self.domain),
                 "Turn off a humidifier".to_string(),
                 json!({
                     "type": "object",
@@ -557,7 +559,7 @@ impl ServiceHandler for HumidifierService {
                 })
             ),
             (
-                format!("{}-set_humidity", self.domain.to_string()),
+                format!("{}-set_humidity", self.domain),
                 "Set the target humidity".to_string(),
                 json!({
                     "type": "object",
@@ -577,7 +579,7 @@ impl ServiceHandler for HumidifierService {
                 })
             ),
             (
-                format!("{}-set_mode", self.domain.to_string()),
+                format!("{}-set_mode", self.domain),
                 "Set the humidifier mode".to_string(),
                 json!({
                     "type": "object",

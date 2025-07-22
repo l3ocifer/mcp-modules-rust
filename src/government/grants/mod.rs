@@ -102,6 +102,7 @@ pub struct GrantsSearchParams {
 /// Client for accessing government grants data
 pub struct GrantsClient<'a> {
     /// Lifecycle manager
+    #[allow(dead_code)]
     lifecycle: &'a LifecycleManager,
     /// HTTP client
     client: Client,
@@ -155,18 +156,18 @@ impl<'a> GrantsClient<'a> {
             .json(&search_data)
             .send()
             .await
-            .map_err(|e| Error::External(format!("Failed to send grants search request: {}", e)))?;
+            .map_err(|e| Error::internal(format!("Failed to send grants search request: {}", e)))?;
             
         if !response.status().is_success() {
             let status = response.status();
             let text = response.text().await
                 .unwrap_or_else(|_| "Unable to read error response".into());
-            return Err(Error::External(format!("Grants API returned error {}: {}", status, text)));
+            return Err(Error::internal(format!("Grants API returned error {}: {}", status, text)));
         }
         
         let api_response: GrantsApiResponse = response.json()
             .await
-            .map_err(|e| Error::External(format!("Failed to parse grants API response: {}", e)))?;
+            .map_err(|e| Error::internal(format!("Failed to parse grants API response: {}", e)))?;
             
         Ok(api_response.data)
     }

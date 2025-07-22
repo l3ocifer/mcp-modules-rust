@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 use std::process::{Command, Stdio};
 use tokio::process::Command as TokioCommand;
 use std::path::{Path, PathBuf};
+use std::fmt;
 
 /// Flutter build target
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -28,16 +29,15 @@ pub enum FlutterBuildTarget {
     Linux,
 }
 
-impl FlutterBuildTarget {
-    /// Convert to string representation for CLI commands
-    pub fn to_string(&self) -> String {
+impl fmt::Display for FlutterBuildTarget {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            FlutterBuildTarget::Apk => "apk".to_string(),
-            FlutterBuildTarget::Ios => "ios".to_string(),
-            FlutterBuildTarget::Web => "web".to_string(),
-            FlutterBuildTarget::MacOS => "macos".to_string(),
-            FlutterBuildTarget::Windows => "windows".to_string(),
-            FlutterBuildTarget::Linux => "linux".to_string(),
+            FlutterBuildTarget::Apk => write!(f, "apk"),
+            FlutterBuildTarget::Ios => write!(f, "ios"),
+            FlutterBuildTarget::Web => write!(f, "web"),
+            FlutterBuildTarget::MacOS => write!(f, "macos"),
+            FlutterBuildTarget::Windows => write!(f, "windows"),
+            FlutterBuildTarget::Linux => write!(f, "linux"),
         }
     }
 }
@@ -58,6 +58,7 @@ pub struct FlutterCommandResult {
 /// Flutter client
 pub struct FlutterClient<'a> {
     /// Lifecycle manager
+    #[allow(dead_code)]
     lifecycle: &'a LifecycleManager,
     /// Flutter project path
     project_path: PathBuf,
@@ -172,7 +173,7 @@ impl<'a> FlutterClient<'a> {
            
         log::info!("Building Flutter application for target: {:?}", target);
         
-        self.execute_command(cmd, format!("flutter build {}", target.to_string())).await
+        self.execute_command(cmd, format!("flutter build {}", target)).await
     }
     
     /// Run Flutter analyzer

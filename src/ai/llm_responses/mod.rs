@@ -45,7 +45,7 @@ impl<'a> LlmResponsesClient<'a> {
             params["args"]["timestamp"] = json!(ts);
         }
 
-        Ok(self.lifecycle.send_request(method, Some(params)).await?["response_id"].as_str().unwrap_or_default().to_string())
+        Ok(self.lifecycle.call_method(method, Some(params)).await?["response_id"].as_str().unwrap_or_default().to_string())
     }
 
     /// Get a stored LLM response by ID
@@ -58,7 +58,7 @@ impl<'a> LlmResponsesClient<'a> {
             }
         });
 
-        let result = self.lifecycle.send_request(method, Some(params)).await?;
+        let result = self.lifecycle.call_method(method, Some(params)).await?;
         serde_json::from_value(result["response"].clone())
             .map_err(|e| Error::parsing(format!("Failed to parse LLM response: {}", e)))
     }
@@ -77,7 +77,7 @@ impl<'a> LlmResponsesClient<'a> {
             params["args"]["limit"] = json!(l);
         }
 
-        let result = self.lifecycle.send_request(method, Some(params)).await?;
+        let result = self.lifecycle.call_method(method, Some(params)).await?;
         serde_json::from_value(result["responses"].clone())
             .map_err(|e| Error::parsing(format!("Failed to parse LLM responses: {}", e)))
     }
@@ -100,7 +100,7 @@ impl<'a> LlmResponsesClient<'a> {
             params["args"]["limit"] = json!(l);
         }
 
-        let result = self.lifecycle.send_request(method, Some(params)).await?;
+        let result = self.lifecycle.call_method(method, Some(params)).await?;
         serde_json::from_value(result["responses"].clone())
             .map_err(|e| Error::parsing(format!("Failed to parse LLM responses: {}", e)))
     }
@@ -115,7 +115,7 @@ impl<'a> LlmResponsesClient<'a> {
             }
         });
 
-        let result = self.lifecycle.send_request(method, Some(params)).await?;
+        let result = self.lifecycle.call_method(method, Some(params)).await?;
         Ok(result["success"].as_bool().unwrap_or(false))
     }
 
@@ -133,7 +133,7 @@ impl<'a> LlmResponsesClient<'a> {
             params["args"]["format"] = json!(fmt);
         }
 
-        let result = self.lifecycle.send_request(method, Some(params)).await?;
+        let result = self.lifecycle.call_method(method, Some(params)).await?;
         Ok(result["count"].as_u64().unwrap_or(0) as u32)
     }
 
@@ -147,40 +147,156 @@ impl<'a> LlmResponsesClient<'a> {
             }
         });
 
-        let result = self.lifecycle.send_request(method, Some(params)).await?;
+        let result = self.lifecycle.call_method(method, Some(params)).await?;
         Ok(result["count"].as_u64().unwrap_or(0) as u32)
     }
 
     /// Get available tools
     pub fn get_tools(&self) -> Vec<ToolDefinition> {
         vec![
-            ToolDefinition::new(
+            ToolDefinition::from_json_schema(
                 "store_llm_response",
                 "Store an LLM response",
+                "data_management",
+                serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "response": {
+                            "type": "string",
+                            "description": "The LLM response content"
+                        },
+                        "model": {
+                            "type": "string",
+                            "description": "LLM model used"
+                        },
+                        "prompt": {
+                            "type": "string",
+                            "description": "Original prompt"
+                        },
+                        "metadata": {
+                            "type": "object",
+                            "description": "Additional metadata"
+                        }
+                    },
+                    "required": ["response", "model"]
+                }),
+                Some(crate::tools::ToolAnnotation::new("data_management").with_description("Store an LLM response"))
             ),
-            ToolDefinition::new(
+            ToolDefinition::from_json_schema(
                 "get_llm_response",
                 "Get a stored LLM response by ID",
+                "data_retrieval",
+                serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "id": {
+                            "type": "string",
+                            "description": "Response ID"
+                        }
+                    },
+                    "required": ["id"]
+                }),
+                Some(crate::tools::ToolAnnotation::new("data_retrieval").with_description("Get a stored LLM response by ID"))
             ),
-            ToolDefinition::new(
+            ToolDefinition::from_json_schema(
                 "list_llm_responses",
                 "List all responses for a specific LLM",
+                "data_retrieval",
+                serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "model": {
+                            "type": "string",
+                            "description": "LLM model to filter by"
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Maximum number of responses to return"
+                        }
+                    },
+                    "required": []
+                }),
+                Some(crate::tools::ToolAnnotation::new("data_retrieval").with_description("List all responses for a specific LLM"))
             ),
-            ToolDefinition::new(
+            ToolDefinition::from_json_schema(
                 "search_llm_responses",
                 "Search for responses containing specific text",
+                "data_search",
+                serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "query": {
+                            "type": "string",
+                            "description": "Search query"
+                        },
+                        "model": {
+                            "type": "string",
+                            "description": "Filter by model"
+                        }
+                    },
+                    "required": ["query"]
+                }),
+                Some(crate::tools::ToolAnnotation::new("data_search").with_description("Search for responses containing specific text"))
             ),
-            ToolDefinition::new(
+            ToolDefinition::from_json_schema(
                 "delete_llm_response",
                 "Delete a stored LLM response",
+                "data_management",
+                serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "id": {
+                            "type": "string",
+                            "description": "Response ID to delete"
+                        }
+                    },
+                    "required": ["id"]
+                }),
+                Some(crate::tools::ToolAnnotation::new("data_management").with_description("Delete a stored LLM response")
+                    .with_security_notes(vec!["Destructive operation".to_string()]))
             ),
-            ToolDefinition::new(
+            ToolDefinition::from_json_schema(
                 "export_llm_responses",
                 "Export responses to a file",
+                "data_export",
+                serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "format": {
+                            "type": "string",
+                            "description": "Export format",
+                            "enum": ["json", "csv", "txt"]
+                        },
+                        "filter": {
+                            "type": "object",
+                            "description": "Filter criteria"
+                        }
+                    },
+                    "required": ["format"]
+                }),
+                Some(crate::tools::ToolAnnotation::new("data_export").with_description("Export responses to a file"))
             ),
-            ToolDefinition::new(
+            ToolDefinition::from_json_schema(
                 "import_llm_responses",
                 "Import responses from a file",
+                "data_import",
+                serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "file_path": {
+                            "type": "string",
+                            "description": "Path to file to import"
+                        },
+                        "format": {
+                            "type": "string",
+                            "description": "Import format",
+                            "enum": ["json", "csv"]
+                        }
+                    },
+                    "required": ["file_path", "format"]
+                }),
+                Some(crate::tools::ToolAnnotation::new("data_import").with_description("Import responses from a file")
+                    .with_security_notes(vec!["Requires file system access".to_string()]))
             ),
         ]
     }

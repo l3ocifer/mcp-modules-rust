@@ -4,7 +4,9 @@ use serde_json::json;
 
 /// PostgreSQL provider for database module
 pub struct PostgreSQLProvider {
+    #[allow(dead_code)]
     connection_string: String,
+    #[allow(dead_code)]
     client: reqwest::Client,
 }
 

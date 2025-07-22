@@ -5,10 +5,17 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-/// Monitoring module implementation
-#[derive(Clone)]
+/// Monitoring module
 pub struct MonitoringModule {
-    lifecycle_manager: Option<Arc<LifecycleManager>>,
+    /// Lifecycle manager
+    #[allow(dead_code)]
+    lifecycle_manager: Option<Arc<crate::lifecycle::LifecycleManager>>,
+}
+
+impl Default for MonitoringModule {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MonitoringModule {

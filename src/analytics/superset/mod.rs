@@ -171,6 +171,7 @@ struct SupersetAuth {
     /// Access token
     access_token: Arc<RwLock<Option<String>>>,
     /// Token refresh endpoint
+    #[allow(dead_code)]
     refresh_endpoint: Option<String>,
     /// Refresh token
     refresh_token: Arc<RwLock<Option<String>>>,
@@ -181,6 +182,7 @@ struct SupersetAuth {
 /// Superset client for MCP
 pub struct SupersetClient<'a> {
     /// Lifecycle manager
+    #[allow(dead_code)]
     lifecycle: &'a LifecycleManager,
     /// HTTP client
     client: Client,
@@ -286,21 +288,14 @@ impl<'a> SupersetClient<'a> {
     /// Get authentication headers
     async fn get_auth_headers(&self) -> Result<HeaderMap> {
         // Check if we have a token
-        let token = {
-            let token = self.auth.access_token.read().await;
-            match &*token {
-                Some(t) => t.clone(),
-                None => {
-                    // Try to authenticate
-                    drop(token);
-                    self.authenticate().await?;
-                    self.auth.access_token.read().await.clone().unwrap()
-                }
-            }
+        let access_token = {
+            let token_guard = self.auth.access_token.read().await;
+            token_guard.clone()
+                .ok_or_else(|| Error::auth("Access token not available"))?
         };
         
         let mut headers = HeaderMap::new();
-        headers.insert(AUTHORIZATION, HeaderValue::from_str(&format!("Bearer {}", token))
+        headers.insert(AUTHORIZATION, HeaderValue::from_str(&format!("Bearer {}", access_token))
             .map_err(|_| Error::internal("Invalid token for header".to_string()))?);
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         

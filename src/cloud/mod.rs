@@ -1,5 +1,21 @@
-use crate::error::Result;
-use crate::config::CloudConfig;
+use crate::error::{Error, Result};
+use serde_json::Value;
+use std::collections::HashMap;
+
+#[derive(Debug, Clone)]
+pub enum CloudProvider {
+    Azure(HashMap<String, String>),
+    Aws(HashMap<String, String>),
+    Gcp(HashMap<String, String>),
+}
+
+#[derive(Debug, Clone)]
+pub struct CloudConfig {
+    pub provider: String,
+    pub providers: Vec<CloudProvider>,
+    pub credentials: HashMap<String, String>,
+}
+
 use crate::lifecycle::LifecycleManager;
 
 pub mod azure;
@@ -21,7 +37,7 @@ impl CloudModule {
     /// Create an Azure client if configured
     pub fn azure<'a>(&self, lifecycle: &'a LifecycleManager) -> Result<AzureClient<'a>> {
         // Check if Azure is configured
-        if !self.config.providers.iter().any(|p| matches!(p, crate::config::CloudProvider::Azure(_))) {
+        if !self.config.providers.iter().any(|p| matches!(p, CloudProvider::Azure(_))) {
             return Err(crate::error::Error::config("Azure is not configured"));
         }
         
