@@ -1,12 +1,8 @@
-use async_trait::async_trait;
 use serde_json::Value;
-use std::sync::Arc;
-use std::collections::HashMap;
-use std::future::Future;
+use async_trait::async_trait;
 use std::pin::Pin;
-use crate::error::{Error, Result};
-use serde::{Serialize, Deserialize};
-use std::time::Duration;
+use std::future::Future;
+use std::sync::Arc;
 use thiserror::Error;
 
 pub mod http;
@@ -62,7 +58,7 @@ pub enum TransportError {
     NotSupported(String),
     
     #[error("Request timeout: {message}")]
-    RequestTimeout { message: String, duration: Option<Duration> },
+    RequestTimeout { message: String, duration: Option<std::time::Duration> },
 }
 
 impl TransportError {
@@ -116,7 +112,7 @@ impl From<TransportError> for crate::error::TransportError {
             TransportError::ParseError(msg) => crate::error::TransportError::Serialization { message: msg, format: Some("JSON-RPC".to_string()) },
             TransportError::Timeout(msg) => crate::error::TransportError::RequestTimeout { 
                 message: msg, 
-                duration: Some(Duration::from_secs(30)) 
+                duration: Some(std::time::Duration::from_secs(30)) 
             },
             TransportError::NotSupported(msg) => crate::error::TransportError::NotSupported { transport_type: msg },
             TransportError::RateLimitExceeded(msg) => crate::error::TransportError::RateLimitExceeded { message: msg, retry_after: None },

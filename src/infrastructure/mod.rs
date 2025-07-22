@@ -117,7 +117,9 @@ impl InfrastructureModule {
     pub fn cloudflare(&self) -> Result<CloudflareClient> {
         for provider in &self.config.providers {
             if let InfrastructureProvider::Cloudflare(config) = provider {
-                let client = CloudflareClient::new(config.clone())?;
+                let cloudflare_config: cloudflare::CloudflareConfig = serde_json::from_value(config.clone())
+                    .map_err(|e| Error::config(format!("Invalid Cloudflare configuration: {}", e)))?;
+                let client = CloudflareClient::new(cloudflare_config)?;
                 return Ok(client);
             }
         }

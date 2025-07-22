@@ -6,7 +6,7 @@ use tokio::process::{Command, Child, ChildStdin, ChildStdout, ChildStderr};
 use std::process::Stdio;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
+use tokio::io::{AsyncWriteExt, BufReader, BufWriter};
 
 /// Stdio transport implementation for MCP
 pub struct StdioTransport {

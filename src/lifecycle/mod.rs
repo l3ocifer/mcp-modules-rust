@@ -1,17 +1,14 @@
-use crate::error::{Error, Result, ErrorContext};
-use crate::transport::{Transport, NotificationHandler, Notification, 
-                      ElicitationRequest, ElicitationResponse, StructuredContent, ResourceLink};
-use crate::tools::{ToolDefinition, ToolExecutionResult, ContentBlock, SchemaValidator};
+use crate::error::{Error, Result};
+use crate::transport::{Transport, NotificationHandler, ElicitationRequest, ElicitationResponse, StructuredContent, ResourceLink};
+use crate::tools::{ToolDefinition, ToolExecutionResult, ProgressInfo, ContentBlock, SchemaValidator};
 use serde::{Serialize, Deserialize};
 use serde_json::Value;
 use std::sync::Arc;
-use std::collections::HashMap;
 use tokio::sync::RwLock;
+use std::collections::HashMap;
 use std::pin::Pin;
 use std::future::Future;
-use serde_json::json;
-use crate::tools::ProgressInfo;
-use async_trait::async_trait;
+use log;
 
 /// Client capabilities for MCP 2025-06-18
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -192,7 +189,7 @@ impl LifecycleManager {
     }
 
     /// Execute tool with context and validation
-    pub async fn execute_tool(&self, name: &str, parameters: serde_json::Value) -> Result<ToolExecutionResult> {
+    pub async fn execute_tool(&self, name: &str, _parameters: serde_json::Value) -> Result<ToolExecutionResult> {
         // Basic tool execution implementation
         let content = vec![ContentBlock::new("text", format!("Executed tool: {}", name))];
         Ok(ToolExecutionResult::success(content))
@@ -221,11 +218,11 @@ impl LifecycleManager {
         };
 
         // Parse structured output efficiently
-        let structured_output = response.get("structuredOutput")
+        let _structured_output = response.get("structuredOutput")
             .and_then(|so| serde_json::from_value::<StructuredContent>(so.clone()).ok());
 
         // Parse resource links with pre-allocation
-        let resource_links = response.get("resourceLinks")
+        let _resource_links = response.get("resourceLinks")
             .and_then(|rl| rl.as_array())
             .map(|array| {
                 let mut links = Vec::with_capacity(array.len());
@@ -326,7 +323,7 @@ impl LifecycleManager {
     /// Process elicitation response (application-specific)
     async fn process_elicitation_response(&self, session: &ElicitationSession, response: &serde_json::Value) -> Result<ToolExecutionResult> {
         // This is a simplified example - real implementation would be more sophisticated
-        let result = serde_json::json!({
+        let _result = serde_json::json!({
             "sessionId": session.id,
             "step": session.step,
             "response": response,
@@ -406,7 +403,7 @@ impl LifecycleManager {
         
         let mut transport = self.transport.write().await;
         transport.add_notification_handler(handler).await
-            .map_err(|e| Error::transport(e.to_string()))
+            .map_err(|e| Error::from(e))
     }
 
     /// Register notification handler with the transport

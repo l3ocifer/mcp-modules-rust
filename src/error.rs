@@ -1,6 +1,5 @@
-use std::fmt;
-use std::error::Error as StdError;
-use serde::{Deserialize, Serialize};
+use std::string::ToString;
+use serde_json::Value;
 use tokio::task::JoinError;
 use std::sync::PoisonError;
 use std::time::SystemTimeError;
@@ -13,7 +12,7 @@ pub enum Error {
     Auth { 
         message: String,
         #[source]
-        source: Option<Box<dyn StdError + Send + Sync>>,
+        source: Option<Box<dyn std::error::Error + Send + Sync>>,
         recoverable: bool,
     },
 
@@ -22,7 +21,7 @@ pub enum Error {
     Config { 
         message: String,
         #[source]
-        source: Option<Box<dyn StdError + Send + Sync>>,
+        source: Option<Box<dyn std::error::Error + Send + Sync>>,
         suggestion: Option<String>,
     },
 
@@ -31,7 +30,7 @@ pub enum Error {
     Network { 
         message: String,
         #[source]
-        source: Option<Box<dyn StdError + Send + Sync>>,
+        source: Option<Box<dyn std::error::Error + Send + Sync>>,
         retry_after: Option<std::time::Duration>,
         endpoint: Option<String>,
     },
@@ -42,7 +41,7 @@ pub enum Error {
         message: String,
         service_name: Option<String>,
         #[source]
-        source: Option<Box<dyn StdError + Send + Sync>>,
+        source: Option<Box<dyn std::error::Error + Send + Sync>>,
         error_code: Option<String>,
     },
 
@@ -56,7 +55,7 @@ pub enum Error {
         message: String,
         protocol_version: Option<String>,
         #[source]
-        source: Option<Box<dyn StdError + Send + Sync>>,
+        source: Option<Box<dyn std::error::Error + Send + Sync>>,
     },
 
     /// Data parsing and validation errors
@@ -66,7 +65,7 @@ pub enum Error {
         expected_format: Option<String>,
         actual_input: Option<String>,
         #[source]
-        source: Option<Box<dyn StdError + Send + Sync>>,
+        source: Option<Box<dyn std::error::Error + Send + Sync>>,
     },
 
     /// Input validation errors
@@ -91,7 +90,7 @@ pub enum Error {
         message: String,
         operation: Option<String>,
         #[source]
-        source: Option<Box<dyn StdError + Send + Sync>>,
+        source: Option<Box<dyn std::error::Error + Send + Sync>>,
     },
 
     /// Invalid data errors
@@ -100,7 +99,7 @@ pub enum Error {
         message: String,
         data_type: Option<String>,
         #[source]
-        source: Option<Box<dyn StdError + Send + Sync>>,
+        source: Option<Box<dyn std::error::Error + Send + Sync>>,
     },
 
     /// Connection-related errors
@@ -110,7 +109,7 @@ pub enum Error {
         endpoint: Option<String>,
         retry_count: Option<u32>,
         #[source]
-        source: Option<Box<dyn StdError + Send + Sync>>,
+        source: Option<Box<dyn std::error::Error + Send + Sync>>,
     },
 
     /// Timeout errors
@@ -136,7 +135,7 @@ pub enum Error {
         api_name: Option<String>,
         status_code: Option<u16>,
         #[source]
-        source: Option<Box<dyn StdError + Send + Sync>>,
+        source: Option<Box<dyn std::error::Error + Send + Sync>>,
     },
 
     /// I/O operation errors
@@ -146,7 +145,7 @@ pub enum Error {
         operation: Option<String>,
         path: Option<std::path::PathBuf>,
         #[source]
-        source: Option<Box<dyn StdError + Send + Sync>>,
+        source: Option<Box<dyn std::error::Error + Send + Sync>>,
     },
 }
 
@@ -291,7 +290,7 @@ impl Error {
         }
     }
 
-    pub fn auth_with_source(message: impl Into<String>, source: Box<dyn StdError + Send + Sync>) -> Self {
+    pub fn auth_with_source(message: impl Into<String>, source: Box<dyn std::error::Error + Send + Sync>) -> Self {
         Self::Auth {
             message: message.into(),
             source: Some(source),
@@ -430,7 +429,7 @@ impl Error {
         }
     }
 
-    pub fn internal_with_source(message: impl Into<String>, source: Box<dyn StdError + Send + Sync>) -> Self {
+    pub fn internal_with_source(message: impl Into<String>, source: Box<dyn std::error::Error + Send + Sync>) -> Self {
         Self::Internal {
             message: message.into(),
             operation: None,

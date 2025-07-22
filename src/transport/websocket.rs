@@ -1,18 +1,14 @@
-use async_trait::async_trait;
 use crate::transport::{Transport, TransportError, NotificationHandler};
-use crate::security::{SecurityModule, SanitizationOptions, ValidationResult};
+use crate::security::SanitizationOptions;
+use crate::error::Result;
 use futures::{SinkExt, StreamExt};
-use serde_json::Value;
-use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
-use tokio_tungstenite::{connect_async, WebSocketStream, MaybeTlsStream};
+use tokio_tungstenite::{WebSocketStream, MaybeTlsStream};
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
-use secrecy::{SecretString, ExposeSecret};
-use url::Url;
+use std::sync::Arc;
+use tokio::sync::Mutex;
 use governor::{Quota, RateLimiter, state::{NotKeyed, InMemoryState}, clock::DefaultClock};
-use std::num::NonZeroU32;
+use async_trait::async_trait;
 
 type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 

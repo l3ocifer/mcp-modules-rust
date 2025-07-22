@@ -2,18 +2,16 @@ use crate::error::{Error, Result, ErrorContext};
 use crate::config::Config;
 use crate::transport::Transport;
 use crate::lifecycle::LifecycleManager;
-use crate::analytics::AnalyticsModule;
-use crate::collaboration::CollaborationModule;
 use crate::creation::McpCreatorClient;
 use crate::tools::ToolManager;
 use crate::web::WebClient;
-use crate::cloud::CloudModule;
 use crate::auth::AuthManager;
 use crate::database::DatabaseModule;
 use crate::security::SecurityModule;
 use crate::infrastructure::InfrastructureModule;
 use crate::cicd::CicdModule;
 use crate::monitoring::MonitoringModule;
+use crate::collaboration::CollaborationModule;
 use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
@@ -85,7 +83,7 @@ impl Mcp {
 
     /// Initialize the MCP client with proper error handling and recovery
     pub async fn initialize(&mut self) -> Result<()> {
-        let context = ErrorContext::new("client_initialization", "client")
+        let _context = ErrorContext::new("client_initialization", "client")
             .with_request_id(self.client_id.clone())
             .with_metadata("transport_type", "auto");
 
@@ -187,7 +185,7 @@ impl Mcp {
                 "websocket" => {
                     let url = transport_config.url.as_ref()
                         .ok_or_else(|| Error::config("WebSocket URL required"))?;
-                    let mut ws_transport = crate::transport::WebSocketTransport::new(url.to_string())?;
+                    let ws_transport = crate::transport::WebSocketTransport::new(url.to_string())?;
                     Ok(Box::new(ws_transport))
                 },
                 "stdio" => {
@@ -303,7 +301,7 @@ impl Mcp {
         };
 
         // Check lifecycle state
-        if let Some(lifecycle) = &self.lifecycle {
+        if let Some(_lifecycle) = &self.lifecycle {
             let transport_status = "healthy".to_string();
             status.modules.insert("transport".to_string(), transport_status);
         } else {

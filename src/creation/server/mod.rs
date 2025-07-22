@@ -453,7 +453,7 @@ impl ServerManager {
         }
         
         // Get server process
-        let (language, file_path) = {
+        let (language, _file_path) = {
             let servers = self.servers.lock()
                 .map_err(|e| Error::internal(format!("Failed to acquire servers lock: {}", e)))?;
             let server = servers.get(server_id)
