@@ -196,7 +196,7 @@ impl LifecycleManager {
     }
 
     /// Parse tool result with optimized allocations
-    async fn parse_tool_result(&self, response: Value, _tool_def: &ToolDefinition) -> Result<ToolExecutionResult> {
+    pub async fn parse_tool_result(&self, response: Value, _tool_def: &ToolDefinition) -> Result<ToolExecutionResult> {
         // Check for elicitation request
         if let Some(elicitation) = response.get("elicitationRequest") {
             let elicitation_req: ElicitationRequest = serde_json::from_value(elicitation.clone())
@@ -372,7 +372,7 @@ impl LifecycleManager {
     }
 
     /// Validate protocol version compatibility with optimized string operations
-    fn validate_protocol_version(&self, version: &str) -> Result<bool> {
+    pub fn validate_protocol_version(&self, version: &str) -> Result<bool> {
         // Simple semantic version check - in production, use a proper semver crate
         let supported_versions = ["1.0.0", "1.0", "1"];
         Ok(supported_versions.contains(&version))

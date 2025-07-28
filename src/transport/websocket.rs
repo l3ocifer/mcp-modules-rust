@@ -1,16 +1,13 @@
 use crate::transport::{Transport, TransportError, NotificationHandler};
 use crate::security::SanitizationOptions;
-use crate::error::Result;
+use crate::error::{Result, Error};
 use futures::{SinkExt, StreamExt};
-use tokio_tungstenite::{WebSocketStream, MaybeTlsStream};
-use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use governor::{Quota, RateLimiter, state::{NotKeyed, InMemoryState}, clock::DefaultClock};
 use async_trait::async_trait;
 
-type WsStream = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
 /// WebSocket transport implementation with rate limiting
 pub struct WebSocketTransport {
@@ -24,7 +21,7 @@ pub struct WebSocketTransport {
 }
 
 impl WebSocketTransport {
-    pub fn new(url: String) -> Result<Self, TransportError> {
+    pub fn new(url: String) -> Result<Self> {
         let quota = Quota::per_second(std::num::NonZeroU32::new(10).unwrap());
         
         Ok(Self {
@@ -39,7 +36,7 @@ impl WebSocketTransport {
     }
 
     /// Set authentication token for secure WebSocket connections
-    pub fn with_auth_token(self, auth_token: &str) -> Result<Self, TransportError> {
+    pub fn with_auth_token(self, auth_token: &str) -> Result<Self> {
         let _validation_opts = SanitizationOptions {
             max_length: Some(512),
             allow_html: false,
@@ -48,36 +45,47 @@ impl WebSocketTransport {
         };
 
         if auth_token.len() > 512 {
-            return Err(TransportError::AuthenticationFailed("Token too long".to_string()));
+            return Err(Error::auth("Token too long".to_string()));
         }
 
         Ok(self)
     }
 
     /// Validate message content and size
-    fn validate_message(&self, message: &serde_json::Value) -> Result<(), TransportError> {
+    pub fn validate_message(&self, message: &serde_json::Value) -> Result<()> {
         // Validate message size to prevent oversized payloads
         let message_size = serde_json::to_string(message).unwrap_or_default().len();
         if message_size > 1_048_576 { // 1MB limit
-            return Err(TransportError::ConnectionError("Message too large".to_string()));
+            return Err(Error::protocol("Message too large".to_string()));
         }
 
         // Check rate limiting
         if self.rate_limiter.check().is_err() {
-            return Err(TransportError::ConnectionError("Rate limit exceeded".to_string()));
+            return Err(Error::network("Rate limit exceeded".to_string()));
         }
 
         Ok(())
     }
 
     /// Check rate limiting
-    fn check_rate_limit(&self) -> Result<(), TransportError> {
+    pub fn check_rate_limit(&self) -> Result<()> {
         match self.rate_limiter.check() {
             Ok(_) => Ok(()),
             Err(_) => {
-                Err(TransportError::RateLimitExceeded("Message rate limit exceeded".to_string()))
+                Err(Error::network("Message rate limit exceeded".to_string()))
             }
         }
+    }
+
+    /// Get pending notifications
+    pub async fn get_notifications(&self) -> Vec<String> {
+        let notifications = self.notifications.lock().await;
+        notifications.clone()
+    }
+
+    /// Get rate limiter reference for monitoring
+    pub fn get_rate_limiter(&self) -> &RateLimiter<NotKeyed, InMemoryState, DefaultClock> {
+        &self.rate_limiter
     }
 }
 

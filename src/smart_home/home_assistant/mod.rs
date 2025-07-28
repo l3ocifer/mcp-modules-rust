@@ -13,7 +13,7 @@ use std::sync::Mutex;
 pub mod entity;
 pub mod service;
 
-use service::{LightService, ClimateService, LockService, AlarmControlPanelService, HumidifierService, CallServiceFn, GetEntityStateFn};
+use service::{LightService, ClimateService, LockService, AlarmControlPanelService, HumidifierService};
 
 /// Home Assistant configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -240,25 +240,31 @@ impl HomeAssistantClient {
 
     /// Get the light service with optimized string handling
     pub fn light_service(&self) -> LightService {
-        let call_service = move |_domain: &str, _service: &str, _data: Value| {
-            let _client = self.clone();
-            let _domain = _domain.to_string();
-            let _service = _service.to_string(); 
-            let _data = _data.clone();
+        // Use weak reference to avoid lifetime issues
+        let weak_lifecycle = Arc::downgrade(&self.lifecycle);
+        
+        let call_service = Box::new(move |domain: &str, service: &str, data: Value| -> Pin<Box<dyn Future<Output = Result<Value>> + Send + 'static>> {
+            let _domain = domain.to_string();
+            let _service = service.to_string(); 
+            let _data = data.clone();
+            let weak_lifecycle = weak_lifecycle.clone();
             
             Box::pin(async move {
+                let _lifecycle = weak_lifecycle.upgrade()
+                    .ok_or_else(|| Error::internal("Lifecycle manager dropped"))?;
+                
                 // Service call implementation - return success value
                 Ok(serde_json::json!({"success": true}))
-            }) as Pin<Box<dyn Future<Output = Result<Value>> + Send>>
-        };
+            })
+        });
         
         // Use weak reference for get_state closure too
-        let weak_lifecycle = Arc::downgrade(&self.lifecycle);
+        let weak_lifecycle_2 = Arc::downgrade(&self.lifecycle);
         
         let get_state = Box::new(move |entity_id: &str| -> Pin<Box<dyn Future<Output = Result<Value>> + Send + 'static>> {
             // Avoid string allocation by borrowing entity_id
             let entity_id = entity_id.to_string();
-            let weak_lifecycle = weak_lifecycle.clone();
+            let weak_lifecycle = weak_lifecycle_2.clone();
             
             Box::pin(async move {
                 let lifecycle = weak_lifecycle.upgrade()
@@ -268,12 +274,8 @@ impl HomeAssistantClient {
                 lifecycle.get_state(&entity_id).await
             })
         });
-        
-        // Box the closure to match expected type
-        let call_service_boxed: CallServiceFn = Box::new(call_service);
-        let get_state_boxed: GetEntityStateFn = Box::new(get_state);
 
-        LightService::new(call_service_boxed, get_state_boxed)
+        LightService::new(call_service, get_state)
     }
 
     /// Get the climate service
@@ -630,7 +632,7 @@ pub struct ToolParameter {
     pub maximum: Option<f64>,
 }
 
-fn schema_to_params(schema: &Value) -> Vec<ToolParameter> {
+pub fn schema_to_params(schema: &Value) -> Vec<ToolParameter> {
     let mut params = Vec::new();
     
     if let Some(properties) = schema.get("properties").and_then(|p| p.as_object()) {

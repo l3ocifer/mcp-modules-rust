@@ -98,7 +98,7 @@ impl WebClient {
     }
 
     /// Handle HTTP response with error checking and JSON parsing
-    async fn handle_response(&self, response: reqwest::Response) -> Result<Value> {
+    pub async fn handle_response(&self, response: reqwest::Response) -> Result<Value> {
         let status = response.status();
         
         if !status.is_success() {
@@ -114,5 +114,10 @@ impl WebClient {
             .map_err(|e| Error::parsing(format!("Failed to parse JSON response: {}", e)))?;
 
         Ok(json)
+    }
+
+    /// Get lifecycle manager reference
+    pub fn get_lifecycle(&self) -> &Arc<LifecycleManager> {
+        &self.lifecycle
     }
 } 

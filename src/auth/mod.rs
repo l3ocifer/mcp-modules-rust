@@ -3,9 +3,6 @@ use crate::security::{SecurityModule, SanitizationOptions, ValidationResult};
 use oauth2::{CsrfToken};
 use url::Url;
 use std::time::{Duration, SystemTime};
-use std::collections::HashMap;
-use serde::{Serialize, Deserialize};
-use chrono::{DateTime, Utc};
 
 pub mod oauth;
 
@@ -289,7 +286,7 @@ impl AuthManager {
         if let Some(client) = &mut self.oauth_client {
             // Check if we have current credentials with refresh token
             if let Some(ref creds) = self.credentials {
-                if let Some(ref refresh_token) = creds.refresh_token {
+                if let Some(ref _refresh_token) = creds.refresh_token {
                     // Check if token is actually expired
                     if let Some(expires_in) = creds.expires_in {
                         let expires_at = creds.created_at + Duration::from_secs(expires_in);
@@ -514,7 +511,7 @@ pub async fn authorize(config: AuthConfig) -> AuthResult<(String, String)> {
     config.validate().map_err(|e| Error::auth(e.to_string()))?;
     
     // Create OAuth client for testing
-    let client = oauth::OAuth21Client::new("http://localhost:8080");
+    let _client = oauth::OAuth21Client::new("http://localhost:8080");
     let security = SecurityModule::new();
     security.log_security_event("OAUTH_AUTHORIZE_ATTEMPT", None);
     
@@ -554,9 +551,9 @@ pub async fn refresh_token(_config: AuthConfig, _refresh_token: &str) -> AuthRes
 
 pub fn test_auth() {
     // Test authentication flow with OAuth 2.1
-    let client = oauth::OAuth21Client::new("http://localhost:8080");
+    let _client = oauth::OAuth21Client::new("http://localhost:8080");
     
-    println!("OAuth client created: {:?}", client);
+    println!("OAuth client created: {:?}", _client);
     
     // In a real implementation:
     // 1. Start authorization flow

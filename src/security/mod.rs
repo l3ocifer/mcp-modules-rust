@@ -1,20 +1,17 @@
 use crate::error::{Error, Result};
 use crate::lifecycle::LifecycleManager;
-use argon2::{Argon2, PasswordHash, PasswordHasher, PasswordVerifier};
-use argon2::password_hash::{rand_core::OsRng, SaltString};
+use argon2::{Argon2, password_hash::SaltString};
 use secrecy::SecretString;
-use ring::{rand::SystemRandom, rand::SecureRandom, pbkdf2};
+use ring::rand::{SystemRandom, SecureRandom};
 use governor::{Quota, RateLimiter, state::{InMemoryState, NotKeyed}, clock::DefaultClock};
 use zeroize::Zeroize;
-use serde::{Deserialize, Serialize};
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use std::sync::Arc;
-use constant_time_eq::constant_time_eq;
 
 /// High-performance security module with zero-copy optimizations
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct SecurityModule {
-    rate_limiter: RateLimiter<NotKeyed, InMemoryState, DefaultClock>,
+    rate_limiter: Arc<RateLimiter<NotKeyed, InMemoryState, DefaultClock>>,
     argon2: Argon2<'static>,
 }
 
@@ -22,7 +19,7 @@ impl SecurityModule {
     /// Create new security module with performance optimizations
     pub fn new() -> Self {
         let quota = Quota::per_second(std::num::NonZeroU32::new(100).unwrap());
-        let rate_limiter = RateLimiter::direct(quota);
+        let rate_limiter = Arc::new(RateLimiter::direct(quota));
         
         Self {
             rate_limiter,
@@ -54,7 +51,7 @@ impl SecurityModule {
     }
 
     /// Generate salt with optimized randomness
-    fn generate_salt(&self) -> [u8; 32] {
+    pub fn generate_salt(&self) -> [u8; 32] {
         let rng = SystemRandom::new();
         let mut salt = [0u8; 32];
         SecureRandom::fill(&rng, &mut salt)
@@ -82,6 +79,16 @@ impl SecurityModule {
         } else {
             ValidationResult::Valid
         }
+    }
+
+    /// Get rate limiter reference for monitoring
+    pub fn get_rate_limiter(&self) -> &RateLimiter<NotKeyed, InMemoryState, DefaultClock> {
+        &self.rate_limiter
+    }
+
+    /// Get argon2 reference for advanced operations
+    pub fn get_argon2(&self) -> &Argon2<'static> {
+        &self.argon2
     }
 
     /// Secure string comparison to prevent timing attacks
@@ -200,6 +207,7 @@ pub mod crypto {
             .expect("Failed to generate secure random bytes");
         bytes
     }
+
 }
 
 #[cfg(test)]

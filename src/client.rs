@@ -132,12 +132,17 @@ impl Mcp {
 
     /// Fix CICD method with proper config handling
     pub fn cicd(&self) -> Result<CicdModule> {
-        Ok(CicdModule::new(self.config.cicd.clone()))
+        let lifecycle = self.lifecycle.clone()
+            .ok_or_else(|| Error::internal("Lifecycle manager not initialized"))?;
+        Ok(CicdModule::from_legacy(self.config.cicd.clone(), lifecycle))
     }
 
     /// Fix monitoring method
     pub fn monitoring(&self) -> Result<MonitoringModule> {
-        Ok(MonitoringModule::new())
+        let lifecycle = self.lifecycle.clone()
+            .ok_or_else(|| Error::internal("Lifecycle manager not initialized"))?;
+        let config = crate::monitoring::MonitoringConfig::default();
+        Ok(MonitoringModule::new(config, lifecycle))
     }
 
     /// Fix creation method to handle async properly
@@ -311,17 +316,22 @@ impl Mcp {
         Ok(status)
     }
 
-    fn get_uptime(&self) -> String {
+    pub fn get_uptime(&self) -> String {
         let elapsed = self.created_at.elapsed();
         format!("{}s", elapsed.as_secs())
     }
 
-    async fn check_transport_health(&self, lifecycle: &Arc<LifecycleManager>) -> String {
+    pub async fn check_transport_health(&self, lifecycle: &Arc<LifecycleManager>) -> String {
         // Simple transport health check
         match lifecycle.call_method("test", Some(serde_json::json!({}))).await {
             Ok(_) => "healthy".to_string(),
             Err(_) => "unhealthy".to_string(),
         }
+    }
+
+    /// Get the creation time of the client
+    pub fn created_at(&self) -> std::time::Instant {
+        self.created_at
     }
 }
 

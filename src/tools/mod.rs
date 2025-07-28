@@ -1,6 +1,5 @@
 use crate::error::{Error, Result};
 use crate::lifecycle::LifecycleManager;
-use crate::transport::{StructuredContent, ResourceLink, ElicitationRequest};
 use std::sync::Arc;
 use std::collections::HashMap;
 use serde::{Serialize, Deserialize};

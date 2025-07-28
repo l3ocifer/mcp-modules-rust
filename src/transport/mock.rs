@@ -53,7 +53,7 @@ impl MockTransport {
     }
 
     /// Efficient message handling for testing
-    async fn receive(&mut self) -> crate::error::Result<Value> {
+    pub async fn receive(&mut self) -> crate::error::Result<Value> {
         let mut messages = self.messages.lock().unwrap();
         if messages.is_empty() {
             Err(crate::error::Error::Transport(
@@ -69,7 +69,7 @@ impl MockTransport {
     }
 
     /// Batch processing with optimized memory allocation
-    async fn batch(&mut self, requests: Vec<serde_json::Value>) -> crate::error::Result<Vec<crate::error::Result<serde_json::Value>>> {
+    pub async fn batch(&mut self, requests: Vec<serde_json::Value>) -> crate::error::Result<Vec<crate::error::Result<serde_json::Value>>> {
         let mut results = Vec::with_capacity(requests.len());
         
         for request in requests {

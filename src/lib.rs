@@ -102,8 +102,7 @@ pub async fn connect_http(url: &str) -> Result<LifecycleManager> {
 
 /// Connect using WebSocket transport with optimized error handling
 pub async fn connect_websocket(url: &str) -> Result<LifecycleManager> {
-    let transport = WebSocketTransport::new(url.to_string())
-        .map_err(|e| Error::Transport(error::TransportError::from(e)))?;
+    let transport = WebSocketTransport::new(url.to_string())?;
     connect_to_server(transport).await
 }
 

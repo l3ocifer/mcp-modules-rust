@@ -1,15 +1,10 @@
 use crate::error::{Error, Result};
 use crate::lifecycle::LifecycleManager;
-use crate::transport::{Transport, StdioTransport};
-use crate::tools::{ToolDefinition, ToolAnnotation};
 use serde::{Serialize, Deserialize};
-use serde_json::{json, Value};
-use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use tokio::process::{Child, ChildStdin, ChildStdout};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use std::path::PathBuf;
+use std::process::Stdio;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::fs;
 use uuid::Uuid;
 use std::time::Duration;
@@ -166,7 +161,7 @@ impl ServerManager {
     }
     
     /// Validate JavaScript/TypeScript code for dangerous patterns
-    fn validate_javascript_code(&self, code: &str) -> Result<()> {
+    pub fn validate_javascript_code(&self, code: &str) -> Result<()> {
         let dangerous_patterns = [
             r"(?i)eval\s*\(",
             r"(?i)function\s*\(\s*\)\s*{\s*return\s+this\s*}",
@@ -194,7 +189,7 @@ impl ServerManager {
     }
     
     /// Validate Python code for dangerous patterns
-    fn validate_python_code(&self, code: &str) -> Result<()> {
+    pub fn validate_python_code(&self, code: &str) -> Result<()> {
         let dangerous_patterns = [
             r"(?i)import\s+os",
             r"(?i)import\s+sys",
@@ -224,7 +219,7 @@ impl ServerManager {
     }
     
     /// Validate Rust code for dangerous patterns
-    fn validate_rust_code(&self, code: &str) -> Result<()> {
+    pub fn validate_rust_code(&self, code: &str) -> Result<()> {
         let dangerous_patterns = [
             r"(?i)use\s+std::process",
             r"(?i)use\s+std::fs",

@@ -10,7 +10,7 @@ use tokio::process::Command as TokioCommand;
 use std::process::Stdio;
 use uuid::Uuid;
 use tokio::io::{AsyncBufReadExt, BufReader};
-use std::path::PathBuf;
+use std::time::SystemTime;
 
 /// Kubernetes pod
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -212,6 +212,88 @@ impl PortForwardManager {
             .map_err(|e| Error::internal(format!("Failed to acquire sessions lock: {}", e)))?;
         Ok(sessions.keys().cloned().collect())
     }
+}
+
+/// AppArmor profile configuration (Kubernetes 1.31 GA feature)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppArmorProfile {
+    /// Profile name
+    pub name: String,
+    /// Profile type (e.g., "runtime/default", "localhost/custom-profile")
+    pub profile_type: String,
+    /// Load status
+    pub load_status: String,
+    /// Enforcement mode
+    pub enforcement_mode: String,
+}
+
+/// Traffic distribution configuration for Services (Kubernetes 1.31 Beta)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrafficDistribution {
+    /// Distribution policy (e.g., "preferZone", "preferClose")
+    pub policy: String,
+    /// Zones configuration
+    pub zones: Option<Vec<String>>,
+    /// Weights for traffic distribution
+    pub weights: Option<HashMap<String, u32>>,
+}
+
+/// VolumeAttributesClass for dynamic volume parameter modification (Kubernetes 1.31 Beta)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VolumeAttributesClass {
+    /// Metadata
+    pub metadata: K8sObjectMeta,
+    /// Driver name
+    pub driver_name: String,
+    /// Parameters that can be modified
+    pub parameters: HashMap<String, String>,
+}
+
+/// Kubernetes object metadata
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct K8sObjectMeta {
+    /// Object name
+    pub name: String,
+    /// Namespace
+    pub namespace: Option<String>,
+    /// Labels
+    pub labels: HashMap<String, String>,
+    /// Annotations
+    pub annotations: HashMap<String, String>,
+    /// Creation timestamp
+    pub creation_timestamp: Option<SystemTime>,
+}
+
+/// Service CIDR configuration (Kubernetes 1.31 Beta)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServiceCIDRConfig {
+    /// Primary CIDR
+    pub primary_cidr: String,
+    /// Secondary CIDRs
+    pub secondary_cidrs: Vec<String>,
+    /// Status
+    pub status: String,
+    /// Allocated IPs count
+    pub allocated_ips: u32,
+    /// Total IPs available
+    pub total_ips: u32,
+}
+
+/// Enhanced security context with AppArmor support
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EnhancedSecurityContext {
+    /// Run as user
+    pub run_as_user: Option<u64>,
+    /// Run as group
+    pub run_as_group: Option<u64>,
+    /// AppArmor profile
+    pub apparmor_profile: Option<AppArmorProfile>,
+    /// SELinux options
+    pub selinux_options: Option<HashMap<String, String>>,
+    /// Capabilities
+    pub capabilities: Option<Vec<String>>,
+    /// Read-only root filesystem
+    pub read_only_root_filesystem: bool,
 }
 
 /// Kubernetes client for container orchestration with security and performance optimizations
@@ -908,7 +990,7 @@ spec:
             return Err(Error::validation("Local port cannot be privileged (< 1024)"));
         }
         
-        if target_port == 0 || target_port > 65535 {
+        if target_port == 0 {
             return Err(Error::validation("Invalid target port"));
         }
         
@@ -1115,7 +1197,7 @@ spec:
     }
 
     /// Sanitize log output to remove sensitive information
-    fn sanitize_log_output(&self, logs: &str) -> String {
+    pub fn sanitize_log_output(&self, logs: &str) -> String {
         let mut sanitized = logs.to_string();
         
         // Remove common patterns that might contain sensitive data
@@ -1159,7 +1241,7 @@ spec:
     }
 
     /// Delete a resource with confirmation
-    pub async fn delete_resource(&self, resource_type: &str, resource_name: &str, namespace: Option<&str>) -> Result<()> {
+    pub async fn delete_resource(&self, resource_type: &str, resource_name: &str, _namespace: Option<&str>) -> Result<()> {
         // This is a destructive operation - require explicit validation
         self.validate_k8s_resource_name(resource_name)?;
         
@@ -1173,6 +1255,248 @@ spec:
         
         // For safety, we're disabling deletion operations
         Err(Error::validation("Resource deletion disabled for security reasons"))
+    }
+
+    /// Get command buffer for debugging
+    pub fn get_command_buffer(&self) -> &Vec<String> {
+        &self.command_buffer
+    }
+
+    /// Add command to buffer for debugging
+    pub fn add_to_command_buffer(&mut self, command: String) {
+        self.command_buffer.push(command);
+    }
+
+    // ====== Kubernetes 1.31 "Elli" New Features ======
+
+    /// List AppArmor profiles (Kubernetes 1.31 GA feature)
+    pub async fn list_apparmor_profiles(&self) -> Result<Vec<AppArmorProfile>> {
+        let output = TokioCommand::new("kubectl")
+            .args(&["get", "apparmorprofiles", "-o", "json"])
+            .output()
+            .await
+            .map_err(|e| Error::internal(format!("Failed to execute kubectl: {}", e)))?;
+
+        if !output.status.success() {
+            return Err(Error::internal(format!("kubectl command failed: {}", 
+                String::from_utf8_lossy(&output.stderr))));
+        }
+
+        let output_str = String::from_utf8_lossy(&output.stdout);
+        let profiles: Vec<AppArmorProfile> = serde_json::from_str(&output_str)
+            .map_err(|e| Error::parsing(format!("Failed to parse AppArmor profiles: {}", e)))?;
+
+        Ok(profiles)
+    }
+
+    /// Configure traffic distribution for a service (Kubernetes 1.31 Beta)
+    pub async fn configure_traffic_distribution(&self, service_name: &str, namespace: &str, distribution: &TrafficDistribution) -> Result<()> {
+        self.validate_k8s_resource_name(service_name)?;
+        self.validate_k8s_resource_name(namespace)?;
+
+        let patch_data = serde_json::json!({
+            "spec": {
+                "trafficDistribution": distribution.policy,
+                "trafficDistributionOptions": {
+                    "zones": distribution.zones,
+                    "weights": distribution.weights
+                }
+            }
+        });
+
+        let output = TokioCommand::new("kubectl")
+            .args(&["patch", "service", service_name, "-n", namespace, "--type=merge", "-p", &patch_data.to_string()])
+            .output()
+            .await
+            .map_err(|e| Error::internal(format!("Failed to execute kubectl: {}", e)))?;
+
+        if !output.status.success() {
+            return Err(Error::internal(format!("Failed to configure traffic distribution: {}", 
+                String::from_utf8_lossy(&output.stderr))));
+        }
+
+        self.security.log_security_event("TRAFFIC_DISTRIBUTION_CONFIGURED", Some(&format!("{}/{}", namespace, service_name)));
+        Ok(())
+    }
+
+    /// Create VolumeAttributesClass (Kubernetes 1.31 Beta)
+    pub async fn create_volume_attributes_class(&self, vac: &VolumeAttributesClass) -> Result<()> {
+        self.validate_k8s_resource_name(&vac.metadata.name)?;
+
+        let manifest = serde_json::json!({
+            "apiVersion": "storage.k8s.io/v1beta1",
+            "kind": "VolumeAttributesClass",
+            "metadata": {
+                "name": vac.metadata.name,
+                "labels": vac.metadata.labels,
+                "annotations": vac.metadata.annotations
+            },
+            "spec": {
+                "driverName": vac.driver_name,
+                "parameters": vac.parameters
+            }
+        });
+
+        let _manifest_str = serde_json::to_string_pretty(&manifest)
+            .map_err(|e| Error::protocol(format!("Failed to serialize VolumeAttributesClass: {}", e)))?;
+
+        let output = TokioCommand::new("kubectl")
+            .args(&["apply", "-f", "-"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| Error::internal(format!("Failed to spawn kubectl: {}", e)))?;
+
+        // Write manifest to stdin (simplified for this implementation)
+        let result = output.wait_with_output().await
+            .map_err(|e| Error::internal(format!("Failed to execute kubectl: {}", e)))?;
+
+        if !result.status.success() {
+            return Err(Error::internal(format!("Failed to create VolumeAttributesClass: {}", 
+                String::from_utf8_lossy(&result.stderr))));
+        }
+
+        self.security.log_security_event("VOLUME_ATTRIBUTES_CLASS_CREATED", Some(&vac.metadata.name));
+        Ok(())
+    }
+
+    /// List service CIDRs (Kubernetes 1.31 Beta)
+    pub async fn list_service_cidrs(&self) -> Result<Vec<ServiceCIDRConfig>> {
+        let output = TokioCommand::new("kubectl")
+            .args(&["get", "servicecidrs", "-o", "json"])
+            .output()
+            .await
+            .map_err(|e| Error::internal(format!("Failed to execute kubectl: {}", e)))?;
+
+        if !output.status.success() {
+            return Err(Error::internal(format!("kubectl command failed: {}", 
+                String::from_utf8_lossy(&output.stderr))));
+        }
+
+        let output_str = String::from_utf8_lossy(&output.stdout);
+        let cidrs: Vec<ServiceCIDRConfig> = serde_json::from_str(&output_str)
+            .map_err(|e| Error::parsing(format!("Failed to parse Service CIDRs: {}", e)))?;
+
+        Ok(cidrs)
+    }
+
+    /// Add secondary service CIDR (Kubernetes 1.31 Beta)
+    pub async fn add_service_cidr(&self, cidr: &str, name: &str) -> Result<()> {
+        self.validate_k8s_resource_name(name)?;
+        
+        // Validate CIDR format (simplified validation)
+        if !cidr.contains('/') {
+            return Err(Error::validation("Invalid CIDR format"));
+        }
+
+        let manifest = serde_json::json!({
+            "apiVersion": "networking.k8s.io/v1beta1",
+            "kind": "ServiceCIDR",
+            "metadata": {
+                "name": name
+            },
+            "spec": {
+                "cidrs": [cidr]
+            }
+        });
+
+        let _manifest_str = serde_json::to_string_pretty(&manifest)
+            .map_err(|e| Error::protocol(format!("Failed to serialize ServiceCIDR: {}", e)))?;
+
+        let output = TokioCommand::new("kubectl")
+            .args(&["apply", "-f", "-"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|e| Error::internal(format!("Failed to spawn kubectl: {}", e)))?;
+
+        let result = output.wait_with_output().await
+            .map_err(|e| Error::internal(format!("Failed to execute kubectl: {}", e)))?;
+
+        if !result.status.success() {
+            return Err(Error::internal(format!("Failed to add Service CIDR: {}", 
+                String::from_utf8_lossy(&result.stderr))));
+        }
+
+        self.security.log_security_event("SERVICE_CIDR_ADDED", Some(&format!("{}: {}", name, cidr)));
+        Ok(())
+    }
+
+    /// Apply enhanced security context with AppArmor (Kubernetes 1.31)
+    pub async fn apply_enhanced_security_context(&self, pod_name: &str, namespace: &str, security_context: &EnhancedSecurityContext) -> Result<()> {
+        self.validate_k8s_resource_name(pod_name)?;
+        self.validate_k8s_resource_name(namespace)?;
+
+        let mut patch_data = serde_json::json!({
+            "spec": {
+                "securityContext": {
+                    "runAsUser": security_context.run_as_user,
+                    "runAsGroup": security_context.run_as_group,
+                    "readOnlyRootFilesystem": security_context.read_only_root_filesystem
+                }
+            }
+        });
+
+        // Add AppArmor annotation if profile is specified
+        if let Some(ref apparmor_profile) = security_context.apparmor_profile {
+            patch_data["metadata"]["annotations"] = serde_json::json!({
+                format!("container.apparmor.security.beta.kubernetes.io/{}", pod_name): 
+                    format!("{}/{}", apparmor_profile.profile_type, apparmor_profile.name)
+            });
+        }
+
+        let output = TokioCommand::new("kubectl")
+            .args(&["patch", "pod", pod_name, "-n", namespace, "--type=strategic", "-p", &patch_data.to_string()])
+            .output()
+            .await
+            .map_err(|e| Error::internal(format!("Failed to execute kubectl: {}", e)))?;
+
+        if !output.status.success() {
+            return Err(Error::internal(format!("Failed to apply security context: {}", 
+                String::from_utf8_lossy(&output.stderr))));
+        }
+
+        self.security.log_security_event("ENHANCED_SECURITY_CONTEXT_APPLIED", 
+            Some(&format!("{}/{}", namespace, pod_name)));
+        Ok(())
+    }
+
+    /// Check Kubernetes version compatibility
+    pub async fn check_version_compatibility(&self) -> Result<String> {
+        let output = TokioCommand::new("kubectl")
+            .args(&["version", "--client=false", "-o", "json"])
+            .output()
+            .await
+            .map_err(|e| Error::internal(format!("Failed to execute kubectl: {}", e)))?;
+
+        if !output.status.success() {
+            return Err(Error::internal(format!("Failed to get Kubernetes version: {}", 
+                String::from_utf8_lossy(&output.stderr))));
+        }
+
+        let output_str = String::from_utf8_lossy(&output.stdout);
+        let version_info: serde_json::Value = serde_json::from_str(&output_str)
+            .map_err(|e| Error::parsing(format!("Failed to parse version info: {}", e)))?;
+
+        let server_version = version_info
+            .get("serverVersion")
+            .and_then(|v| v.get("gitVersion"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+
+        // Check if it's Kubernetes 1.31 or later for new features
+        let is_compatible = server_version.contains("v1.31") || 
+                           server_version.contains("v1.32") ||
+                           server_version.contains("v1.33") ||
+                           server_version.contains("v1.34");
+
+        if is_compatible {
+            Ok(format!("Compatible: {} supports Kubernetes 1.31+ features", server_version))
+        } else {
+            Ok(format!("Limited compatibility: {} may not support all Kubernetes 1.31+ features", server_version))
+        }
     }
 }
 

@@ -3,7 +3,6 @@
 /// Provides analytics and metrics collection with efficient data processing,
 /// streaming analytics, and performance monitoring capabilities.
 
-use crate::error::{Error, Result};
 use crate::lifecycle::LifecycleManager;
 use std::sync::Arc;
 use std::collections::HashMap;
@@ -89,6 +88,11 @@ pub mod superset {
         pub fn with_api_key(mut self, api_key: String) -> Self {
             self.api_key = Some(api_key);
             self
+        }
+
+        /// Get base URL
+        pub fn get_base_url(&self) -> &str {
+            &self.base_url
         }
     }
 

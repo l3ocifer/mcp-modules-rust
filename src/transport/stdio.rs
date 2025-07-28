@@ -94,23 +94,23 @@ impl StdioTransport {
         })
     }
 
-    async fn request(&mut self, _method: &str, _params: Option<Value>) -> Result<Value> {
+    pub async fn request(&mut self, _method: &str, _params: Option<Value>) -> Result<Value> {
         Err(Error::internal("Not yet implemented"))
     }
 
-    async fn notify(&mut self, _method: &str, _params: Option<Value>) -> Result<()> {
+    pub async fn notify(&mut self, _method: &str, _params: Option<Value>) -> Result<()> {
         Ok(())
     }
 
-    async fn send(&mut self, _message: Value) -> Result<()> {
+    pub async fn send(&mut self, _message: Value) -> Result<()> {
         Ok(())
     }
 
-    async fn receive(&mut self) -> Result<Value> {
+    pub async fn receive(&mut self) -> Result<Value> {
         Ok(Value::Null)
     }
 
-    async fn on_notification(&self, notification: Notification) -> Result<()> {
+    pub async fn on_notification(&self, notification: Notification) -> Result<()> {
         let handlers = self.notification_handlers.lock().await;
         for handler in handlers.iter() {
             handler(notification.clone()).await?;

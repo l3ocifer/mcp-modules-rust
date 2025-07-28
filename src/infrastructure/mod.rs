@@ -18,7 +18,7 @@ pub mod docker;
 pub mod cloudflare;
 
 use kubernetes::KubernetesClient;
-use docker::DockerClient;
+use docker::ContainerClient;
 use cloudflare::CloudflareClient;
 
 #[derive(Debug, Clone)]
@@ -93,7 +93,7 @@ impl InfrastructureModule {
     }
     
     /// Get Docker client
-    pub fn docker(&self) -> Result<DockerClient> {
+    pub async fn docker(&self) -> Result<ContainerClient> {
         // Check if Docker is configured
         let docker_config = self.config.providers.iter()
             .find_map(|p| {
@@ -106,7 +106,7 @@ impl InfrastructureModule {
             
         if docker_config.is_some() {
             // Check if lifecycle manager is available
-            let client = DockerClient::new(Arc::new(self.lifecycle.clone()));
+            let client = ContainerClient::new(Arc::new(self.lifecycle.clone())).await?;
             return Ok(client);
         }
         
@@ -162,7 +162,7 @@ impl InfrastructureModule {
         Ok(tools)
     }
 
-    fn create_k8s_tools(&self, pods: Vec<String>) -> Vec<ToolDefinition> {
+    pub fn create_k8s_tools(&self, pods: Vec<String>) -> Vec<ToolDefinition> {
         let mut tools = Vec::with_capacity(pods.len() * 4); // Pre-allocate for performance
         
         for pod in pods {
@@ -190,7 +190,7 @@ impl InfrastructureModule {
         tools
     }
 
-    fn create_docker_tools(&self, containers: Vec<Container>) -> Vec<ToolDefinition> {
+    pub fn create_docker_tools(&self, containers: Vec<Container>) -> Vec<ToolDefinition> {
         let mut tools = Vec::with_capacity(containers.len() * 3); // Pre-allocate for performance
         
         for container in &containers {

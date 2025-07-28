@@ -3,10 +3,8 @@ use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use serde::{Serialize, Deserialize};
 
 use crate::error::{Error, Result};
-use serde_json::Value;
-use std::collections::HashMap;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CloudflareConfig {
     pub api_token: String,
     pub zone_id: String,
