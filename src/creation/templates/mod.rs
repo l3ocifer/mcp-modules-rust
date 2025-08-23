@@ -198,4 +198,4 @@ async fn main() -> Result<()> {
     server.add_tool(Box::new(EchoTool));
     server.run().await
 }
-"#; 
+"#;

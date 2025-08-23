@@ -30,7 +30,13 @@ impl<'a> LlmResponsesClient<'a> {
     }
 
     /// Store an LLM response
-    pub async fn store_response(&self, llm_id: &str, prompt: &str, response: &str, timestamp: Option<u64>) -> Result<String> {
+    pub async fn store_response(
+        &self,
+        llm_id: &str,
+        prompt: &str,
+        response: &str,
+        timestamp: Option<u64>,
+    ) -> Result<String> {
         let method = "tools/execute";
         let mut params = json!({
             "name": "store_llm_response",
@@ -45,7 +51,12 @@ impl<'a> LlmResponsesClient<'a> {
             params["args"]["timestamp"] = json!(ts);
         }
 
-        Ok(self.lifecycle.call_method(method, Some(params)).await?["response_id"].as_str().unwrap_or_default().to_string())
+        Ok(
+            self.lifecycle.call_method(method, Some(params)).await?["response_id"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string(),
+        )
     }
 
     /// Get a stored LLM response by ID
@@ -64,7 +75,11 @@ impl<'a> LlmResponsesClient<'a> {
     }
 
     /// List all responses for a specific LLM
-    pub async fn list_responses(&self, llm_id: &str, limit: Option<u32>) -> Result<Vec<LlmResponse>> {
+    pub async fn list_responses(
+        &self,
+        llm_id: &str,
+        limit: Option<u32>,
+    ) -> Result<Vec<LlmResponse>> {
         let method = "tools/execute";
         let mut params = json!({
             "name": "list_llm_responses",
@@ -83,7 +98,12 @@ impl<'a> LlmResponsesClient<'a> {
     }
 
     /// Search for responses containing specific text
-    pub async fn search_responses(&self, search_text: &str, llm_id: Option<&str>, limit: Option<u32>) -> Result<Vec<LlmResponse>> {
+    pub async fn search_responses(
+        &self,
+        search_text: &str,
+        llm_id: Option<&str>,
+        limit: Option<u32>,
+    ) -> Result<Vec<LlmResponse>> {
         let method = "tools/execute";
         let mut params = json!({
             "name": "search_llm_responses",
@@ -180,7 +200,10 @@ impl<'a> LlmResponsesClient<'a> {
                     },
                     "required": ["response", "model"]
                 }),
-                Some(crate::tools::ToolAnnotation::new("data_management").with_description("Store an LLM response"))
+                Some(
+                    crate::tools::ToolAnnotation::new("data_management")
+                        .with_description("Store an LLM response"),
+                ),
             ),
             ToolDefinition::from_json_schema(
                 "get_llm_response",
@@ -196,7 +219,10 @@ impl<'a> LlmResponsesClient<'a> {
                     },
                     "required": ["id"]
                 }),
-                Some(crate::tools::ToolAnnotation::new("data_retrieval").with_description("Get a stored LLM response by ID"))
+                Some(
+                    crate::tools::ToolAnnotation::new("data_retrieval")
+                        .with_description("Get a stored LLM response by ID"),
+                ),
             ),
             ToolDefinition::from_json_schema(
                 "list_llm_responses",
@@ -216,7 +242,10 @@ impl<'a> LlmResponsesClient<'a> {
                     },
                     "required": []
                 }),
-                Some(crate::tools::ToolAnnotation::new("data_retrieval").with_description("List all responses for a specific LLM"))
+                Some(
+                    crate::tools::ToolAnnotation::new("data_retrieval")
+                        .with_description("List all responses for a specific LLM"),
+                ),
             ),
             ToolDefinition::from_json_schema(
                 "search_llm_responses",
@@ -236,7 +265,10 @@ impl<'a> LlmResponsesClient<'a> {
                     },
                     "required": ["query"]
                 }),
-                Some(crate::tools::ToolAnnotation::new("data_search").with_description("Search for responses containing specific text"))
+                Some(
+                    crate::tools::ToolAnnotation::new("data_search")
+                        .with_description("Search for responses containing specific text"),
+                ),
             ),
             ToolDefinition::from_json_schema(
                 "delete_llm_response",
@@ -252,8 +284,11 @@ impl<'a> LlmResponsesClient<'a> {
                     },
                     "required": ["id"]
                 }),
-                Some(crate::tools::ToolAnnotation::new("data_management").with_description("Delete a stored LLM response")
-                    .with_security_notes(vec!["Destructive operation".to_string()]))
+                Some(
+                    crate::tools::ToolAnnotation::new("data_management")
+                        .with_description("Delete a stored LLM response")
+                        .with_security_notes(vec!["Destructive operation".to_string()]),
+                ),
             ),
             ToolDefinition::from_json_schema(
                 "export_llm_responses",
@@ -274,7 +309,10 @@ impl<'a> LlmResponsesClient<'a> {
                     },
                     "required": ["format"]
                 }),
-                Some(crate::tools::ToolAnnotation::new("data_export").with_description("Export responses to a file"))
+                Some(
+                    crate::tools::ToolAnnotation::new("data_export")
+                        .with_description("Export responses to a file"),
+                ),
             ),
             ToolDefinition::from_json_schema(
                 "import_llm_responses",
@@ -295,9 +333,12 @@ impl<'a> LlmResponsesClient<'a> {
                     },
                     "required": ["file_path", "format"]
                 }),
-                Some(crate::tools::ToolAnnotation::new("data_import").with_description("Import responses from a file")
-                    .with_security_notes(vec!["Requires file system access".to_string()]))
+                Some(
+                    crate::tools::ToolAnnotation::new("data_import")
+                        .with_description("Import responses from a file")
+                        .with_security_notes(vec!["Requires file system access".to_string()]),
+                ),
             ),
         ]
     }
-} 
+}

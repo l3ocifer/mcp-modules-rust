@@ -1,19 +1,26 @@
-use crate::transport::{Transport, TransportError, NotificationHandler};
+use crate::error::{Error, Result};
 use crate::security::SanitizationOptions;
-use crate::error::{Result, Error};
+use crate::transport::{NotificationHandler, Transport, TransportError};
+use async_trait::async_trait;
 use futures::{SinkExt, StreamExt};
-use tokio_tungstenite::tungstenite::Message;
+use governor::{
+    clock::DefaultClock,
+    state::{InMemoryState, NotKeyed},
+    Quota, RateLimiter,
+};
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use governor::{Quota, RateLimiter, state::{NotKeyed, InMemoryState}, clock::DefaultClock};
-use async_trait::async_trait;
-
+use tokio_tungstenite::tungstenite::Message;
 
 /// WebSocket transport implementation with rate limiting
 pub struct WebSocketTransport {
     url: String,
     auth_token: Option<String>,
-    websocket: Option<tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>>,
+    websocket: Option<
+        tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+    >,
     connected: bool,
     notifications: Arc<Mutex<Vec<String>>>,
     notification_handlers: Vec<NotificationHandler>,
@@ -23,7 +30,7 @@ pub struct WebSocketTransport {
 impl WebSocketTransport {
     pub fn new(url: String) -> Result<Self> {
         let quota = Quota::per_second(std::num::NonZeroU32::new(10).unwrap());
-        
+
         Ok(Self {
             url,
             websocket: None,
@@ -55,7 +62,8 @@ impl WebSocketTransport {
     pub fn validate_message(&self, message: &serde_json::Value) -> Result<()> {
         // Validate message size to prevent oversized payloads
         let message_size = serde_json::to_string(message).unwrap_or_default().len();
-        if message_size > 1_048_576 { // 1MB limit
+        if message_size > 1_048_576 {
+            // 1MB limit
             return Err(Error::protocol("Message too large".to_string()));
         }
 
@@ -71,9 +79,7 @@ impl WebSocketTransport {
     pub fn check_rate_limit(&self) -> Result<()> {
         match self.rate_limiter.check() {
             Ok(_) => Ok(()),
-            Err(_) => {
-                Err(Error::network("Message rate limit exceeded".to_string()))
-            }
+            Err(_) => Err(Error::network("Message rate limit exceeded".to_string())),
         }
     }
 
@@ -95,7 +101,10 @@ impl std::fmt::Debug for WebSocketTransport {
             .field("url", &self.url)
             .field("websocket", &self.websocket.is_some())
             .field("auth_token", &self.auth_token.is_some())
-            .field("notification_handlers_count", &self.notification_handlers.len())
+            .field(
+                "notification_handlers_count",
+                &self.notification_handlers.len(),
+            )
             .finish()
     }
 }
@@ -112,7 +121,9 @@ impl Transport for WebSocketTransport {
         } else {
             tokio_tungstenite::connect_async(&self.url).await
         }
-        .map_err(|e| TransportError::ConnectionError(format!("WebSocket connection failed: {}", e)))?;
+        .map_err(|e| {
+            TransportError::ConnectionError(format!("WebSocket connection failed: {}", e))
+        })?;
 
         self.websocket = Some(ws_stream);
         self.connected = true;
@@ -128,9 +139,13 @@ impl Transport for WebSocketTransport {
         Ok(())
     }
 
-    async fn request(&mut self, method: &str, params: Option<serde_json::Value>) -> std::result::Result<serde_json::Value, TransportError> {
+    async fn request(
+        &mut self,
+        method: &str,
+        params: Option<serde_json::Value>,
+    ) -> std::result::Result<serde_json::Value, TransportError> {
         let request_id = uuid::Uuid::new_v4().to_string();
-        
+
         let message = serde_json::json!({
             "jsonrpc": "2.0",
             "id": request_id,
@@ -142,9 +157,10 @@ impl Transport for WebSocketTransport {
             .map_err(|e| TransportError::send(format!("Failed to serialize request: {}", e)))?;
 
         if let Some(ref mut stream) = self.websocket {
-            stream.send(Message::Text(request_str)).await
-                .map_err(|e| TransportError::ConnectionError(format!("Failed to send message: {}", e)))?;
-            
+            stream.send(Message::Text(request_str)).await.map_err(|e| {
+                TransportError::ConnectionError(format!("Failed to send message: {}", e))
+            })?;
+
             // Wait for response - simplified for now
             while let Some(msg) = stream.next().await {
                 match msg {
@@ -158,36 +174,55 @@ impl Transport for WebSocketTransport {
                                 }
                             }
                         }
-                    },
+                    }
                     Ok(_) => continue,
-                    Err(e) => return Err(TransportError::ConnectionError(format!("WebSocket error: {}", e))),
+                    Err(e) => {
+                        return Err(TransportError::ConnectionError(format!(
+                            "WebSocket error: {}",
+                            e
+                        )))
+                    }
                 }
             }
         }
 
-        Err(TransportError::ConnectionError("No response received".to_string()))
+        Err(TransportError::ConnectionError(
+            "No response received".to_string(),
+        ))
     }
 
-    async fn notify(&mut self, method: &str, params: Option<serde_json::Value>) -> std::result::Result<(), TransportError> {
+    async fn notify(
+        &mut self,
+        method: &str,
+        params: Option<serde_json::Value>,
+    ) -> std::result::Result<(), TransportError> {
         let notification = serde_json::json!({
             "jsonrpc": "2.0",
             "method": method,
             "params": params.unwrap_or(serde_json::Value::Null)
         });
 
-        let notification_str = serde_json::to_string(&notification)
-            .map_err(|e| TransportError::send(format!("Failed to serialize notification: {}", e)))?;
+        let notification_str = serde_json::to_string(&notification).map_err(|e| {
+            TransportError::send(format!("Failed to serialize notification: {}", e))
+        })?;
 
         if let Some(ref mut stream) = self.websocket {
-            stream.send(Message::Text(notification_str)).await
-                .map_err(|e| TransportError::ConnectionError(format!("Failed to send notification: {}", e)))?;
+            stream
+                .send(Message::Text(notification_str))
+                .await
+                .map_err(|e| {
+                    TransportError::ConnectionError(format!("Failed to send notification: {}", e))
+                })?;
         }
 
         Ok(())
     }
 
-    async fn add_notification_handler(&mut self, handler: NotificationHandler) -> std::result::Result<(), TransportError> {
+    async fn add_notification_handler(
+        &mut self,
+        handler: NotificationHandler,
+    ) -> std::result::Result<(), TransportError> {
         self.notification_handlers.push(handler);
         Ok(())
     }
-} 
+}

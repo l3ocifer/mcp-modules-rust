@@ -198,20 +198,20 @@ pub struct CreationConfig {
 }
 
 /// Main configuration structure optimized for memory layout
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Config {
     // Hot data: frequently accessed fields grouped together for cache efficiency
     pub transport: Option<TransportConfig>,
     pub auth: Option<AuthConfig>,
     pub security: Option<SecurityConfig>,
-    
+
     // Warm data: occasionally accessed configuration
     pub infrastructure: Option<InfrastructureConfig>,
     pub cicd: Option<CicdConfig>,
     pub monitoring: Option<MonitoringConfig>,
     pub database: Option<DatabaseConfig>,
     pub collaboration: Option<CollaborationConfig>,
-    
+
     // Cold data: rarely accessed configuration
     pub development: Option<DevelopmentConfig>,
     pub analytics: Option<AnalyticsConfig>,
@@ -227,82 +227,55 @@ pub struct Config {
     pub creation: Option<CreationConfig>,
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            transport: None,
-            auth: None,
-            security: None,
-            infrastructure: None,
-            cicd: None,
-            monitoring: None,
-            database: None,
-            collaboration: None,
-            development: None,
-            analytics: None,
-            gaming: None,
-            office: None,
-            research: None,
-            ai: None,
-            smart_home: None,
-            government: None,
-            memory: None,
-            finance: None,
-            maps: None,
-            creation: None,
-        }
-    }
-}
-
 impl Config {
     /// Create a new configuration with optimized validation
     pub fn new() -> Self {
         Self::default()
     }
-    
+
     /// Load configuration from file with efficient parsing
     pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self> {
         let contents = std::fs::read_to_string(path.as_ref())
             .map_err(|e| Error::config(format!("Failed to read config file: {}", e)))?;
-        
-        Self::from_str(&contents)
+
+        Self::parse(&contents)
     }
-    
+
     /// Parse configuration from string with optimized error handling
-    pub fn from_str(contents: &str) -> Result<Self> {
+    pub fn parse(contents: &str) -> Result<Self> {
         // Parse as JSON
         let config = serde_json::from_str::<Self>(contents)
             .map_err(|e| Error::config(format!("Failed to parse config: {}", e)))?;
-        
+
         config.validate().map(|_| config)
     }
-    
+
     /// Validate configuration with efficient checks
     pub fn validate(&self) -> Result<()> {
         // Pre-allocate error collection for batch validation
         let mut validation_errors = Vec::with_capacity(8);
-        
+
         // Validate transport configuration
         if let Some(ref transport) = self.transport {
             if let Err(e) = transport.validate() {
                 validation_errors.push(format!("Transport: {}", e));
             }
         }
-        
-        // Validate auth configuration  
+
+        // Validate auth configuration
         if let Some(ref auth) = self.auth {
             if let Err(e) = auth.validate() {
                 validation_errors.push(format!("Auth: {}", e));
             }
         }
-        
+
         // Validate security configuration
         if let Some(ref security) = self.security {
             if let Err(e) = security.validate() {
                 validation_errors.push(format!("Security: {}", e));
             }
         }
-        
+
         // Return batch validation results
         if validation_errors.is_empty() {
             Ok(())
@@ -310,7 +283,7 @@ impl Config {
             Err(Error::validation(validation_errors.join("; ")))
         }
     }
-    
+
     /// Merge configurations efficiently
     pub fn merge(&mut self, other: Config) {
         macro_rules! merge_option {
@@ -320,7 +293,7 @@ impl Config {
                 }
             };
         }
-        
+
         merge_option!(transport);
         merge_option!(auth);
         merge_option!(security);
@@ -342,4 +315,45 @@ impl Config {
         merge_option!(maps);
         merge_option!(creation);
     }
-} 
+
+    // Feature enablement checks
+    pub fn database_enabled(&self) -> bool {
+        self.database.is_some()
+    }
+
+    pub fn cloud_enabled(&self) -> bool {
+        self.infrastructure.is_some()
+    }
+
+    pub fn containers_enabled(&self) -> bool {
+        self.infrastructure.is_some()
+    }
+
+    pub fn cicd_enabled(&self) -> bool {
+        self.cicd.is_some()
+    }
+
+    pub fn monitoring_enabled(&self) -> bool {
+        self.monitoring.is_some()
+    }
+
+    pub fn ai_enabled(&self) -> bool {
+        self.ai.is_some()
+    }
+
+    pub fn analytics_enabled(&self) -> bool {
+        self.analytics.is_some()
+    }
+
+    pub fn office_enabled(&self) -> bool {
+        self.office.is_some()
+    }
+
+    pub fn gaming_enabled(&self) -> bool {
+        self.gaming.is_some()
+    }
+
+    pub fn smart_home_enabled(&self) -> bool {
+        self.smart_home.is_some()
+    }
+}

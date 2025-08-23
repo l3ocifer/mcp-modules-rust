@@ -11,6 +11,10 @@ documentation = "https://docs.rs/devops-mcp"
 keywords = ["mcp", "devops", "protocol", "api", "integration"]
 categories = ["api-bindings", "development-tools", "web-programming"]
 
+[[bin]]
+name = "devops-mcp"
+path = "src/main.rs"
+
 [dependencies]
 # Core async runtime - Updated to fix vulnerability RUSTSEC-2025-0023
 tokio = { version = "1.46", features = ["full"] }
@@ -97,10 +101,15 @@ bollard = { version = "0.18", optional = true }
 argon2 = "0.5"           # Secure password hashing
 rand = "0.9"             # Cryptographically secure random numbers
 subtle = "2.6"           # Constant-time operations
+hmac = "0.12"            # HMAC for message authentication
+sha2 = "0.10"            # SHA-2 hash functions
 
 # Additional security dependencies
 rustls-native-certs = "0.8"
 webpki-roots = "0.26"
+
+# File handling
+tempfile = "3.8"
 
 [features]
 default = ["rustls-tls"]

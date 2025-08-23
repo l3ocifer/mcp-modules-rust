@@ -1,27 +1,24 @@
+pub mod excel;
 /// Office module for managing office-related applications and documents
 pub mod powerpoint;
 pub mod word;
-pub mod excel;
 
 // Re-export specific items instead of using glob imports
 // PowerPoint module
 pub use powerpoint::{
-    PowerPointClient, Presentation, Slide, SlideLayout, PresentationTheme,
-    BulletPoint, ImageType,
+    BulletPoint, ImageType, PowerPointClient, Presentation, PresentationTheme, Slide, SlideLayout,
 };
 
 // Word module
-pub use word::{
-    WordClient, Document, Section, Paragraph, Alignment, Table, TableCell,
-};
+pub use word::{Alignment, Document, Paragraph, Section, Table, TableCell, WordClient};
 
 // Excel module
 pub use excel::{
-    ExcelClient, Workbook, Worksheet, Row, Column, Cell, CellValue, CellFormat, Chart, ChartType,
+    Cell, CellFormat, CellValue, Chart, ChartType, Column, ExcelClient, Row, Workbook, Worksheet,
 };
 
 // Re-export with namespaced structs to avoid ambiguity
-pub use powerpoint::TextFormatting as PowerPointTextFormatting;
 pub use powerpoint::Image as PowerPointImage;
+pub use powerpoint::TextFormatting as PowerPointTextFormatting;
+pub use word::Image as WordImage;
 pub use word::TextFormatting as WordTextFormatting;
-pub use word::Image as WordImage; 

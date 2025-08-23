@@ -1,2 +1,2 @@
 /// Steam gaming module
-pub mod steam; 
+pub mod steam;

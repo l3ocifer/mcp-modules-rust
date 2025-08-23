@@ -1,15 +1,14 @@
 /// High-performance web client module for MCP operations
-/// 
+///
 /// Provides optimized HTTP/HTTPS client functionality with connection pooling,
 /// request/response caching, and efficient memory management.
-
 use crate::error::{Error, Result};
 use crate::lifecycle::LifecycleManager;
 use reqwest::Client;
 use serde_json::Value;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
-use std::collections::HashMap;
 
 /// High-performance web client with connection pooling and caching
 #[derive(Debug)]
@@ -43,12 +42,13 @@ impl WebClient {
 
     /// Perform GET request with optimized response handling
     pub async fn get(&self, url: &str) -> Result<Value> {
-        let response = self.client
+        let response = self
+            .client
             .get(url)
             .headers(self.build_headers()?)
             .send()
             .await
-            .map_err(|e| Error::Network { 
+            .map_err(|e| Error::Network {
                 message: format!("Request failed: {}", e),
                 source: Some(Box::new(e)),
                 retry_after: None,
@@ -63,13 +63,14 @@ impl WebClient {
 
     /// Perform POST request with JSON payload
     pub async fn post(&self, url: &str, payload: &Value) -> Result<Value> {
-        let response = self.client
+        let response = self
+            .client
             .post(url)
             .headers(self.build_headers()?)
             .json(payload)
             .send()
             .await
-            .map_err(|e| Error::Network { 
+            .map_err(|e| Error::Network {
                 message: format!("Request failed: {}", e),
                 source: Some(Box::new(e)),
                 retry_after: None,
@@ -85,7 +86,7 @@ impl WebClient {
     /// Build request headers with performance optimization
     fn build_headers(&self) -> Result<reqwest::header::HeaderMap> {
         let mut headers = reqwest::header::HeaderMap::with_capacity(self.base_headers.len());
-        
+
         for (key, value) in &self.base_headers {
             let header_name = reqwest::header::HeaderName::from_bytes(key.as_bytes())
                 .map_err(|e| Error::validation(format!("Invalid header name: {}", e)))?;
@@ -100,9 +101,9 @@ impl WebClient {
     /// Handle HTTP response with error checking and JSON parsing
     pub async fn handle_response(&self, response: reqwest::Response) -> Result<Value> {
         let status = response.status();
-        
+
         if !status.is_success() {
-            return Err(Error::Network { 
+            return Err(Error::Network {
                 message: format!("HTTP error: {}", status),
                 source: None,
                 retry_after: None,
@@ -110,7 +111,9 @@ impl WebClient {
             });
         }
 
-        let json: Value = response.json().await
+        let json: Value = response
+            .json()
+            .await
             .map_err(|e| Error::parsing(format!("Failed to parse JSON response: {}", e)))?;
 
         Ok(json)
@@ -120,4 +123,4 @@ impl WebClient {
     pub fn get_lifecycle(&self) -> &Arc<LifecycleManager> {
         &self.lifecycle
     }
-} 
+}

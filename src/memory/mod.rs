@@ -1,10 +1,13 @@
 use crate::error::{Error, Result};
 use crate::lifecycle::LifecycleManager;
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use chrono::{DateTime, Utc};
-use uuid::Uuid;
 use std::collections::HashMap;
+use uuid::Uuid;
+use std::sync::Arc;
+
+pub mod persistence;
 
 /// Memory type enum for categorizing memories
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -130,37 +133,66 @@ pub struct MemorySearchParams {
     pub limit: Option<usize>,
 }
 
-/// Memory client for storing and retrieving long-term memories
-pub struct MemoryClient<'a> {
-    /// Lifecycle manager
-    #[allow(dead_code)]
-    lifecycle: &'a LifecycleManager,
-    /// In-memory storage for memories (would be replaced with a database in production)
-    memories: HashMap<String, Memory>,
-    /// In-memory storage for relationships
-    relationships: Vec<Relationship>,
+/// Memory statistics for analytics
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryStatistics {
+    /// Total number of memories
+    pub total_memories: usize,
+    /// Count by memory type
+    pub type_counts: HashMap<String, usize>,
+    /// Total number of relationships
+    pub total_relationships: usize,
+    /// Last updated timestamp
+    pub last_updated: DateTime<Utc>,
 }
 
-impl<'a> MemoryClient<'a> {
-    /// Create a new memory client
-    pub fn new(lifecycle: &'a LifecycleManager) -> Self {
+/// Memory client for storing and retrieving long-term memories with persistence
+pub struct MemoryClient {
+    /// Lifecycle manager
+    #[allow(dead_code)]
+    lifecycle: Arc<LifecycleManager>,
+    /// Persistence backend
+    store: Arc<dyn persistence::MemoryStore>,
+}
+
+impl MemoryClient {
+    /// Create a new memory client with PostgreSQL backend
+    pub async fn new_with_postgres(
+        lifecycle: Arc<LifecycleManager>, 
+        connection_string: String
+    ) -> Result<Self> {
+        let store = Arc::new(persistence::PostgreSQLMemoryStore::new(connection_string).await?);
+        Ok(Self {
+            lifecycle,
+            store,
+        })
+    }
+
+    /// Create a new memory client with in-memory backend (for testing/development)
+    pub fn new_in_memory(lifecycle: Arc<LifecycleManager>) -> Self {
+        let store = Arc::new(persistence::InMemoryStore::new());
         Self {
             lifecycle,
-            memories: HashMap::new(),
-            relationships: Vec::new(),
+            store,
         }
     }
 
+    /// Backwards compatible constructor (uses in-memory store)
+    pub fn new(lifecycle: &LifecycleManager) -> Self {
+        Self::new_in_memory(Arc::new(lifecycle.clone()))
+    }
+
     /// Create a new memory
-    pub async fn create_memory(&mut self, 
-        memory_type: MemoryType, 
-        title: impl Into<String>, 
+    pub async fn create_memory(
+        &self,
+        memory_type: MemoryType,
+        title: impl Into<String>,
         content: impl Into<String>,
         metadata: Option<HashMap<String, Value>>,
     ) -> Result<String> {
         let id = format!("{}-{}", memory_type, Uuid::new_v4());
         let now = Utc::now();
-        
+
         let memory = Memory {
             id: id.clone(),
             memory_type,
@@ -170,91 +202,105 @@ impl<'a> MemoryClient<'a> {
             created_at: now,
             updated_at: now,
         };
-        
-        self.memories.insert(id.clone(), memory);
+
+        self.store.store_memory(&memory).await?;
         Ok(id)
     }
-    
+
+    /// Convenient method to create memory from a Memory struct
+    pub async fn create_memory_from_struct(&self, mut memory: Memory) -> Result<String> {
+        if memory.id.is_empty() {
+            memory.id = format!("{}-{}", memory.memory_type, Uuid::new_v4());
+        }
+        
+        let now = Utc::now();
+        if memory.created_at == DateTime::<Utc>::from_timestamp(0, 0).unwrap() {
+            memory.created_at = now;
+        }
+        memory.updated_at = now;
+
+        self.store.store_memory(&memory).await?;
+        Ok(memory.id)
+    }
+
     /// Get a memory by ID
-    pub fn get_memory(&self, id: &str) -> Result<Memory> {
-        self.memories.get(id)
-            .cloned()
-            .ok_or_else(|| Error::not_found_with_resource(
+    pub async fn get_memory(&self, id: &str) -> Result<Memory> {
+        match self.store.get_memory(id).await? {
+            Some(memory) => Ok(memory),
+            None => Err(Error::not_found_with_resource(
                 format!("Memory with ID '{}' not found", id),
                 "memory",
-                id
+                id,
             ))
+        }
     }
-    
+
     /// Update an existing memory
-    pub async fn update_memory(&mut self, 
+    pub async fn update_memory(
+        &self,
         id: &str,
-        title: Option<String>, 
+        title: Option<String>,
         content: Option<String>,
         metadata: Option<HashMap<String, Value>>,
     ) -> Result<()> {
-        let memory = self.memories.get_mut(id)
-            .ok_or_else(|| Error::not_found_with_resource(
-                format!("Memory with ID '{}' not found", id),
-                "memory",
-                id
-            ))?;
-            
+        // Get existing memory
+        let mut memory = self.get_memory(id).await?;
+
+        // Update fields
         if let Some(title) = title {
             memory.title = title;
         }
-        
+
         if let Some(content) = content {
             memory.content = content;
         }
-        
+
         if let Some(metadata) = metadata {
             memory.metadata.extend(metadata);
         }
-        
+
         memory.updated_at = Utc::now();
+
+        // Store updated memory
+        self.store.update_memory(&memory).await?;
         Ok(())
     }
-    
+
     /// Delete a memory by ID
-    pub async fn delete_memory(&mut self, id: &str) -> Result<()> {
-        if self.memories.remove(id).is_none() {
-            return Err(Error::not_found_with_resource(
-                format!("Memory with ID '{}' not found", id),
-                "memory",
-                id
-            ));
-        }
+    pub async fn delete_memory(&self, id: &str) -> Result<()> {
+        // Delete relationships first
+        self.store.delete_relationships(id).await?;
         
-        // Remove all relationships involving this memory
-        self.relationships.retain(|r| r.from_id != id && r.to_id != id);
+        // Delete the memory
+        self.store.delete_memory(id).await?;
         Ok(())
     }
-    
+
     /// Create a relationship between two memories
-    pub async fn create_relationship(&mut self, 
-        from_id: &str, 
-        to_id: &str, 
+    pub async fn create_relationship(
+        &self,
+        from_id: &str,
+        to_id: &str,
         relation_type: RelationType,
         metadata: Option<HashMap<String, Value>>,
     ) -> Result<()> {
         // Verify both memories exist
-        if !self.memories.contains_key(from_id) {
-            return Err(Error::not_found_with_resource(
+        self.get_memory(from_id).await.map_err(|_| {
+            Error::not_found_with_resource(
                 format!("Source memory with ID '{}' not found", from_id),
                 "memory",
-                from_id
-            ));
-        }
-        
-        if !self.memories.contains_key(to_id) {
-            return Err(Error::not_found_with_resource(
+                from_id,
+            )
+        })?;
+
+        self.get_memory(to_id).await.map_err(|_| {
+            Error::not_found_with_resource(
                 format!("Target memory with ID '{}' not found", to_id),
-                "memory", 
-                to_id
-            ));
-        }
-        
+                "memory",
+                to_id,
+            )
+        })?;
+
         let relationship = Relationship {
             from_id: from_id.to_string(),
             to_id: to_id.to_string(),
@@ -262,105 +308,79 @@ impl<'a> MemoryClient<'a> {
             metadata: metadata.unwrap_or_default(),
             created_at: Utc::now(),
         };
-        
-        self.relationships.push(relationship);
+
+        self.store.store_relationship(&relationship).await?;
         Ok(())
     }
-    
-    /// Search for memories with zero-copy optimizations
+
+    /// Search for memories with optimized database queries
     pub async fn search_memories(&self, params: MemorySearchParams) -> Result<Vec<Memory>> {
-        // Pre-allocate with estimated capacity based on filters
-        let _estimated_capacity = if params.memory_type.is_some() || params.keyword.is_some() {
-            self.memories.len() / 4 // Assume 25% match rate for filtered searches
-        } else {
-            self.memories.len()
-        };
-
-        // Use iterator chains to avoid intermediate collections
-        let filtered_memories: Vec<Memory> = self.memories
-            .values()
-            .filter(|memory| {
-                // Filter by memory type first (most selective)
-                if let Some(ref memory_type) = params.memory_type {
-                    if memory.memory_type != *memory_type {
-                        return false;
-                    }
-                }
-                
-                // Filter by keyword (avoid string allocations by comparing with original case)
-                if let Some(ref keyword) = params.keyword {
-                    let keyword_lower = keyword.to_lowercase();
-                    if !memory.title.to_lowercase().contains(&keyword_lower) 
-                        && !memory.content.to_lowercase().contains(&keyword_lower) {
-                        return false;
-                    }
-                }
-                
-                // Filter by metadata
-                if let Some(ref metadata_filters) = params.metadata_filters {
-                    for (key, value) in metadata_filters {
-                        if !memory.metadata.get(key)
-                            .map(|v| v == value)
-                            .unwrap_or(false) {
-                            return false;
-                        }
-                    }
-                }
-                
-                true
-            })
-            .take(params.limit.unwrap_or(usize::MAX)) // Apply limit during iteration
-            .cloned() // Only clone the final filtered results
-            .collect();
-
-        Ok(filtered_memories)
+        self.store.search_memories(&params).await
     }
-    
-    /// Get all relationships for a memory with optimized filtering
+
+    /// Get all relationships for a memory
     pub async fn get_relationships(&self, memory_id: &str) -> Result<Vec<Relationship>> {
-        if !self.memories.contains_key(memory_id) {
-            return Err(Error::not_found_with_resource(
-                format!("Memory with ID '{}' not found", memory_id),
-                "memory",
-                memory_id
-            ));
-        }
-
-        // Use iterator with pre-allocation hint
-        let mut relationships = Vec::with_capacity(self.relationships.len() / 10); // Estimate 10% match rate
+        // Verify memory exists
+        self.get_memory(memory_id).await?;
         
-        relationships.extend(
-            self.relationships
-                .iter()
-                .filter(|r| r.from_id == memory_id || r.to_id == memory_id)
-                .cloned()
-        );
-            
-        Ok(relationships)
+        self.store.get_relationships(memory_id).await
     }
-    
-    /// Get related memories with zero-copy string handling
+
+    /// Get related memories with optimized queries
     pub async fn get_related_memories(&self, memory_id: &str) -> Result<Vec<Memory>> {
         let relationships = self.get_relationships(memory_id).await?;
-        
+
         // Pre-allocate based on relationship count
         let mut related_memories = Vec::with_capacity(relationships.len());
-        
-        // Use filter_map to combine operations and avoid intermediate collections
-        related_memories.extend(
-            relationships
-                .iter()
-                .filter_map(|r| {
-                    let related_id = if r.from_id == memory_id {
-                        &r.to_id
-                    } else {
-                        &r.from_id
-                    };
-                    self.memories.get(related_id).cloned()
-                })
-        );
+
+        // Use async operations to fetch related memories
+        for relationship in relationships {
+            let related_id = if relationship.from_id == memory_id {
+                &relationship.to_id
+            } else {
+                &relationship.from_id
+            };
             
+            if let Ok(memory) = self.get_memory(related_id).await {
+                related_memories.push(memory);
+            }
+        }
+
         Ok(related_memories)
+    }
+
+    /// Get health status of the memory store
+    pub async fn health_check(&self) -> Result<bool> {
+        self.store.health_check().await
+    }
+
+    /// Get memory statistics
+    pub async fn get_statistics(&self) -> Result<MemoryStatistics> {
+        // For now, we'll implement basic stats
+        // In a full implementation, the store would provide efficient counting
+        let empty_params = MemorySearchParams {
+            memory_type: None,
+            keyword: None,
+            metadata_filters: None,
+            limit: None,
+        };
+        
+        let all_memories = self.store.search_memories(&empty_params).await?;
+        let total_memories = all_memories.len();
+        
+        // Count by type
+        let mut type_counts = HashMap::new();
+        for memory in &all_memories {
+            let count = type_counts.entry(memory.memory_type.to_string()).or_insert(0);
+            *count += 1;
+        }
+
+        Ok(MemoryStatistics {
+            total_memories,
+            type_counts,
+            total_relationships: 0, // Would need separate query
+            last_updated: Utc::now(),
+        })
     }
 
     /// Get registered tools
@@ -469,4 +489,5 @@ impl<'a> MemoryClient<'a> {
             ),
         ]
     }
-} 
+}
+

@@ -1,14 +1,19 @@
 use crate::error::{Error, Result};
-use crate::transport::{Transport, NotificationHandler, ElicitationRequest, ElicitationResponse, StructuredContent, ResourceLink};
-use crate::tools::{ToolDefinition, ToolExecutionResult, ProgressInfo, ContentBlock, SchemaValidator};
-use serde::{Serialize, Deserialize};
+use crate::tools::{
+    ContentBlock, ProgressInfo, SchemaValidator, ToolDefinition, ToolExecutionResult,
+};
+use crate::transport::{
+    ElicitationRequest, ElicitationResponse, NotificationHandler, ResourceLink, StructuredContent,
+    Transport,
+};
+use log;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use std::collections::HashMap;
-use std::pin::Pin;
-use std::future::Future;
-use log;
 
 /// Client capabilities for MCP 2025-06-18
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -150,7 +155,8 @@ impl LifecycleManager {
     /// Call a method on the transport layer (MCP protocol)
     pub async fn call_method(&self, method: &str, params: Option<Value>) -> Result<Value> {
         let mut transport = self.transport.write().await;
-        transport.request(method, params)
+        transport
+            .request(method, params)
             .await
             .map_err(|e| Error::transport(e.into()))
     }
@@ -158,7 +164,8 @@ impl LifecycleManager {
     /// Send a notification to the transport layer
     pub async fn notify(&self, method: &str, params: Option<Value>) -> Result<()> {
         let mut transport = self.transport.write().await;
-        transport.notify(method, params)
+        transport
+            .notify(method, params)
             .await
             .map_err(|e| Error::transport(e.into()))
     }
@@ -184,67 +191,86 @@ impl LifecycleManager {
     }
 
     /// Get transport reference for operations
-    pub async fn transport(&self) -> tokio::sync::RwLockReadGuard<'_, Box<dyn Transport + Send + Sync>> {
+    pub async fn transport(
+        &self,
+    ) -> tokio::sync::RwLockReadGuard<'_, Box<dyn Transport + Send + Sync>> {
         self.transport.read().await
     }
 
     /// Execute tool with context and validation
-    pub async fn execute_tool(&self, name: &str, _parameters: serde_json::Value) -> Result<ToolExecutionResult> {
+    pub async fn execute_tool(
+        &self,
+        name: &str,
+        _parameters: serde_json::Value,
+    ) -> Result<ToolExecutionResult> {
         // Basic tool execution implementation
-        let content = vec![ContentBlock::new("text", format!("Executed tool: {}", name))];
+        let content = vec![ContentBlock::new(
+            "text",
+            format!("Executed tool: {}", name),
+        )];
         Ok(ToolExecutionResult::success(content))
     }
 
     /// Parse tool result with optimized allocations
-    pub async fn parse_tool_result(&self, response: Value, _tool_def: &ToolDefinition) -> Result<ToolExecutionResult> {
+    pub async fn parse_tool_result(
+        &self,
+        response: Value,
+        _tool_def: &ToolDefinition,
+    ) -> Result<ToolExecutionResult> {
         // Check for elicitation request
         if let Some(elicitation) = response.get("elicitationRequest") {
             let elicitation_req: ElicitationRequest = serde_json::from_value(elicitation.clone())
-                .map_err(|e| Error::protocol(format!("Failed to parse elicitation request: {}", e)))?;
-            
+                .map_err(|e| {
+                Error::protocol(format!("Failed to parse elicitation request: {}", e))
+            })?;
+
             return Ok(ToolExecutionResult::needs_elicitation(elicitation_req));
         }
 
         // Parse content blocks with pre-allocation
-        let content = if let Some(content_array) = response.get("content").and_then(|c| c.as_array()) {
-            let mut content_blocks = Vec::with_capacity(content_array.len());
-            content_blocks.extend(
-                content_array.iter()
-                    .filter_map(|item| serde_json::from_value::<ContentBlock>(item.clone()).ok())
-            );
-            content_blocks
-        } else {
-            Vec::with_capacity(0)
-        };
+        let content =
+            if let Some(content_array) = response.get("content").and_then(|c| c.as_array()) {
+                let mut content_blocks = Vec::with_capacity(content_array.len());
+                content_blocks.extend(
+                    content_array.iter().filter_map(|item| {
+                        serde_json::from_value::<ContentBlock>(item.clone()).ok()
+                    }),
+                );
+                content_blocks
+            } else {
+                Vec::with_capacity(0)
+            };
 
         // Parse structured output efficiently
-        let _structured_output = response.get("structuredOutput")
+        let _structured_output = response
+            .get("structuredOutput")
             .and_then(|so| serde_json::from_value::<StructuredContent>(so.clone()).ok());
 
         // Parse resource links with pre-allocation
-        let _resource_links = response.get("resourceLinks")
-            .and_then(|rl| rl.as_array())
-            .map(|array| {
-                let mut links = Vec::with_capacity(array.len());
-                links.extend(
-                    array.iter()
-                        .filter_map(|item| serde_json::from_value::<ResourceLink>(item.clone()).ok())
-                );
-                links
-            });
+        let _resource_links =
+            response
+                .get("resourceLinks")
+                .and_then(|rl| rl.as_array())
+                .map(|array| {
+                    let mut links = Vec::with_capacity(array.len());
+                    links.extend(array.iter().filter_map(|item| {
+                        serde_json::from_value::<ResourceLink>(item.clone()).ok()
+                    }));
+                    links
+                });
 
         // Check for errors with efficient string handling
         if let Some(error) = response.get("error") {
-            let code = error.get("code")
-                .and_then(|c| c.as_i64())
-                .unwrap_or(0) as i32;
-            let message = error.get("message")
+            let code = error.get("code").and_then(|c| c.as_i64()).unwrap_or(0) as i32;
+            let message = error
+                .get("message")
                 .and_then(|m| m.as_str())
                 .unwrap_or("Unknown error");
-            let stack_trace = error.get("stackTrace")
+            let stack_trace = error
+                .get("stackTrace")
                 .and_then(|st| st.as_str())
                 .map(|s| s.to_string());
-            
+
             let tool_error = crate::tools::ToolError {
                 code,
                 message: message.to_string(),
@@ -267,9 +293,13 @@ impl LifecycleManager {
     }
 
     /// Start an elicitation session
-    pub async fn start_elicitation(&self, request: ElicitationRequest, context: Value) -> Result<String> {
+    pub async fn start_elicitation(
+        &self,
+        request: ElicitationRequest,
+        context: Value,
+    ) -> Result<String> {
         let session_id = uuid::Uuid::new_v4().to_string();
-        
+
         let session = ElicitationSession {
             id: session_id.clone(),
             context,
@@ -296,24 +326,35 @@ impl LifecycleManager {
     }
 
     /// Continue elicitation with user response
-    pub async fn continue_elicitation(&mut self, session_id: &str, response: serde_json::Value) -> Result<ToolExecutionResult> {
+    pub async fn continue_elicitation(
+        &mut self,
+        session_id: &str,
+        response: serde_json::Value,
+    ) -> Result<ToolExecutionResult> {
         let mut sessions = self.elicitation_sessions.write().await;
-        let session = sessions.get_mut(session_id)
+        let session = sessions
+            .get_mut(session_id)
             .ok_or_else(|| Error::not_found("Elicitation session not found"))?;
 
         session.step += 1;
         if session.step >= session.max_steps {
-            return Err(Error::operation("Maximum elicitation steps exceeded".to_string()));
+            return Err(Error::operation(
+                "Maximum elicitation steps exceeded".to_string(),
+            ));
         }
 
         // Process the response (this would be application-specific logic)
-        let result = self.process_elicitation_response(session, &response).await?;
-        
+        let result = self
+            .process_elicitation_response(session, &response)
+            .await?;
+
         // If elicitation is complete, clean up the session
-        if response.get("metadata")
+        if response
+            .get("metadata")
             .and_then(|m| m.get("complete"))
             .and_then(|c| c.as_bool())
-            .unwrap_or(false) {
+            .unwrap_or(false)
+        {
             sessions.remove(session_id);
         }
 
@@ -321,7 +362,11 @@ impl LifecycleManager {
     }
 
     /// Process elicitation response (application-specific)
-    async fn process_elicitation_response(&self, session: &ElicitationSession, response: &serde_json::Value) -> Result<ToolExecutionResult> {
+    async fn process_elicitation_response(
+        &self,
+        session: &ElicitationSession,
+        response: &serde_json::Value,
+    ) -> Result<ToolExecutionResult> {
         // This is a simplified example - real implementation would be more sophisticated
         let _result = serde_json::json!({
             "sessionId": session.id,
@@ -330,7 +375,10 @@ impl LifecycleManager {
             "status": "continuing"
         });
 
-        Ok(ToolExecutionResult::success(vec![ContentBlock::new("text", format!("Processed response: {:?}", response))]))
+        Ok(ToolExecutionResult::success(vec![ContentBlock::new(
+            "text",
+            format!("Processed response: {:?}", response),
+        )]))
     }
 
     /// Get server capabilities
@@ -351,7 +399,13 @@ impl LifecycleManager {
     }
 
     /// Call a service on the server (for business logic integration)
-    pub async fn call_service(&self, domain: &str, service: &str, entity_data: Option<Value>, service_data: Option<Value>) -> Result<Value> {
+    pub async fn call_service(
+        &self,
+        domain: &str,
+        service: &str,
+        entity_data: Option<Value>,
+        service_data: Option<Value>,
+    ) -> Result<Value> {
         let params = serde_json::json!({
             "domain": domain,
             "service": service,
@@ -397,19 +451,27 @@ impl LifecycleManager {
         let handler = Arc::new(move |method: String, params: Value| {
             Box::pin(async move {
                 // Handle the notification
-                log::info!("Received notification: {} with params: {:?}", method, params);
+                log::info!(
+                    "Received notification: {} with params: {:?}",
+                    method,
+                    params
+                );
             }) as Pin<Box<dyn Future<Output = ()> + Send>>
         });
-        
+
         let mut transport = self.transport.write().await;
-        transport.add_notification_handler(handler).await
-            .map_err(|e| Error::from(e))
+        transport
+            .add_notification_handler(handler)
+            .await
+            .map_err(Error::from)
     }
 
     /// Register notification handler with the transport
     pub async fn register_notification_handler(&self, handler: NotificationHandler) -> Result<()> {
         let mut transport = self.transport.write().await;
-        transport.add_notification_handler(handler).await
+        transport
+            .add_notification_handler(handler)
+            .await
             .map_err(|e| Error::transport(e.into()))
     }
 }
@@ -432,4 +494,4 @@ impl Default for ClientCapabilities {
             schema_validation: Some(false),
         }
     }
-} 
+}

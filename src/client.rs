@@ -1,22 +1,22 @@
-use crate::error::{Error, Result, ErrorContext};
-use crate::config::Config;
-use crate::transport::Transport;
-use crate::lifecycle::LifecycleManager;
-use crate::creation::McpCreatorClient;
-use crate::tools::ToolManager;
-use crate::web::WebClient;
 use crate::auth::AuthManager;
-use crate::database::DatabaseModule;
-use crate::security::SecurityModule;
-use crate::infrastructure::InfrastructureModule;
 use crate::cicd::CicdModule;
-use crate::monitoring::MonitoringModule;
 use crate::collaboration::CollaborationModule;
+use crate::config::Config;
+use crate::creation::McpCreatorClient;
+use crate::database::DatabaseModule;
+use crate::error::{Error, ErrorContext, Result};
+use crate::infrastructure::InfrastructureModule;
+use crate::lifecycle::LifecycleManager;
+use crate::monitoring::MonitoringModule;
+use crate::security::SecurityModule;
+use crate::tools::ToolManager;
+use crate::transport::Transport;
+use crate::web::WebClient;
+use serde::{Deserialize, Serialize};
+use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
 use uuid::Uuid;
-use serde::{Serialize, Deserialize};
-use std::fmt;
 
 impl From<crate::transport::TransportError> for Error {
     fn from(err: crate::transport::TransportError) -> Self {
@@ -41,8 +41,8 @@ pub struct Mcp {
 impl Mcp {
     /// Create a new MCP client with validation
     pub fn new(config: Config) -> Result<Self> {
-        let context = ErrorContext::new("client_creation", "client")
-            .with_metadata("config_version", "v1");
+        let context =
+            ErrorContext::new("client_creation", "client").with_metadata("config_version", "v1");
 
         // Validate configuration
         config.validate().map_err(|e| {
@@ -52,7 +52,7 @@ impl Mcp {
         })?;
 
         let client_id = Uuid::new_v4().to_string();
-        
+
         tracing::info!(
             client_id = %client_id,
             "Creating new MCP client"
@@ -70,7 +70,7 @@ impl Mcp {
     /// Create a new MCP client from configuration file
     pub fn from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Self> {
         let _context = ErrorContext::new("config_from_file", "client")
-            .with_metadata("path", &path.as_ref().to_string_lossy().to_string());
+            .with_metadata("path", path.as_ref().to_string_lossy().to_string());
 
         let config_data = std::fs::read_to_string(&path)
             .map_err(|e| Error::config(format!("Failed to read config file: {}", e)))?;
@@ -95,22 +95,21 @@ impl Mcp {
         tracing::info!(client_id = %self.client_id, "Initializing MCP client");
 
         // Create transport with retry logic
-        let transport = tokio::time::timeout(
-            Duration::from_secs(10),
-            self.create_transport()
-        ).await.map_err(|_| Error::timeout("Transport creation timeout"))??;
+        let transport = tokio::time::timeout(Duration::from_secs(10), self.create_transport())
+            .await
+            .map_err(|_| Error::timeout("Transport creation timeout"))??;
 
         // Initialize lifecycle manager with timeout
         let client_capabilities = self.create_client_capabilities();
-        
-        let lifecycle: Result<LifecycleManager> = tokio::time::timeout(
-            Duration::from_secs(30),
-            async { 
+
+        let lifecycle: Result<LifecycleManager> =
+            tokio::time::timeout(Duration::from_secs(30), async {
                 let mut lifecycle = LifecycleManager::new(transport);
                 lifecycle.set_client_capabilities(client_capabilities);
                 Ok(lifecycle)
-            }
-        ).await.map_err(|_| Error::timeout("Lifecycle initialization timeout"))?;
+            })
+            .await
+            .map_err(|_| Error::timeout("Lifecycle initialization timeout"))?;
 
         self.lifecycle = Some(Arc::new(lifecycle?));
         self.initialized = true;
@@ -125,21 +124,24 @@ impl Mcp {
 
     /// Fix infrastructure method with proper config handling
     pub fn infrastructure(&self) -> Result<InfrastructureModule> {
-        let config = self.config.infrastructure.clone()
-            .unwrap_or_default();
+        let config = self.config.infrastructure.clone().unwrap_or_default();
         Ok(InfrastructureModule::new(config))
     }
 
     /// Fix CICD method with proper config handling
     pub fn cicd(&self) -> Result<CicdModule> {
-        let lifecycle = self.lifecycle.clone()
+        let lifecycle = self
+            .lifecycle
+            .clone()
             .ok_or_else(|| Error::internal("Lifecycle manager not initialized"))?;
         Ok(CicdModule::from_legacy(self.config.cicd.clone(), lifecycle))
     }
 
     /// Fix monitoring method
     pub fn monitoring(&self) -> Result<MonitoringModule> {
-        let lifecycle = self.lifecycle.clone()
+        let lifecycle = self
+            .lifecycle
+            .clone()
             .ok_or_else(|| Error::internal("Lifecycle manager not initialized"))?;
         let config = crate::monitoring::MonitoringConfig::default();
         Ok(MonitoringModule::new(config, lifecycle))
@@ -157,19 +159,26 @@ impl Mcp {
 
     /// Fix web method
     pub fn web(&self) -> Result<WebClient> {
-        let lifecycle = self.lifecycle.clone()
+        let lifecycle = self
+            .lifecycle
+            .clone()
             .ok_or_else(|| Error::config("Lifecycle manager required for web client"))?;
         WebClient::new(lifecycle)
     }
 
     /// Fix auth method with proper OAuth config access
     pub fn auth(&self) -> Result<AuthManager> {
-        let auth_config = self.config.auth.as_ref()
+        let auth_config = self
+            .config
+            .auth
+            .as_ref()
             .ok_or_else(|| Error::config("Authentication configuration required"))?;
-        
-        let oauth_config = auth_config.oauth.as_ref()
+
+        let oauth_config = auth_config
+            .oauth
+            .as_ref()
             .ok_or_else(|| Error::config("OAuth configuration required"))?;
-        
+
         let config = crate::auth::AuthConfig {
             provider_type: crate::auth::AuthProviderType::OAuth2,
             client_id: oauth_config.client_id.clone(),
@@ -179,7 +188,7 @@ impl Mcp {
             redirect_url: oauth_config.redirect_url.clone(),
             scopes: oauth_config.scopes.clone(),
         };
-        
+
         AuthManager::new(config)
     }
 
@@ -188,31 +197,40 @@ impl Mcp {
         if let Some(transport_config) = &self.config.transport {
             match transport_config.transport_type.as_str() {
                 "websocket" => {
-                    let url = transport_config.url.as_ref()
+                    let url = transport_config
+                        .url
+                        .as_ref()
                         .ok_or_else(|| Error::config("WebSocket URL required"))?;
                     let ws_transport = crate::transport::WebSocketTransport::new(url.to_string())?;
                     Ok(Box::new(ws_transport))
-                },
+                }
                 "stdio" => {
-                    let command = transport_config.command.as_ref()
+                    let command = transport_config
+                        .command
+                        .as_ref()
                         .ok_or_else(|| Error::config("Command required for stdio transport"))?;
-                    let args = transport_config.args.as_ref().map(|a| a.clone());
+                    let args = transport_config.args.clone();
                     let transport = crate::transport::StdioTransport::new(command, args).await?;
                     Ok(Box::new(transport))
-                },
+                }
                 "http" => {
-                    let url = transport_config.url.as_ref()
+                    let url = transport_config
+                        .url
+                        .as_ref()
                         .ok_or_else(|| Error::config("HTTP URL required"))?;
                     let transport = crate::transport::http::HttpTransport::new(url.to_string())?;
                     Ok(Box::new(transport))
                 }
                 _ => {
-                    let transport = crate::transport::http::HttpTransport::new("http://localhost:3000".to_string())?;
+                    let transport = crate::transport::http::HttpTransport::new(
+                        "http://localhost:3000".to_string(),
+                    )?;
                     Ok(Box::new(transport))
                 }
             }
         } else {
-            let transport = crate::transport::http::HttpTransport::new("http://localhost:3000".to_string())?;
+            let transport =
+                crate::transport::http::HttpTransport::new("http://localhost:3000".to_string())?;
             Ok(Box::new(transport))
         }
     }
@@ -229,13 +247,20 @@ impl Mcp {
                 cancellation: false,
             }),
             elicitation: None,
-            auth: self.config.auth.as_ref().map(|_| crate::lifecycle::AuthCapabilities {
-                oauth_versions: vec!["2.0".to_string()],
-                pkce: true,
-                dynamic_registration: false,
-                resource_indicators: false,
-            }),
-            content_types: Some(vec!["application/json".to_string(), "text/plain".to_string()]),
+            auth: self
+                .config
+                .auth
+                .as_ref()
+                .map(|_| crate::lifecycle::AuthCapabilities {
+                    oauth_versions: vec!["2.0".to_string()],
+                    pkce: true,
+                    dynamic_registration: false,
+                    resource_indicators: false,
+                }),
+            content_types: Some(vec![
+                "application/json".to_string(),
+                "text/plain".to_string(),
+            ]),
             schema_validation: Some(true),
         }
     }
@@ -274,17 +299,15 @@ impl Mcp {
     pub async fn shutdown(&mut self) -> Result<()> {
         if let Some(lifecycle) = self.lifecycle.take() {
             // Graceful shutdown with timeout
-            tokio::time::timeout(
-                Duration::from_secs(30),
-                async move {
-                    // Arc handling - if we can unwrap, call shutdown, otherwise just drop
-                    if Arc::strong_count(&lifecycle) == 1 {
-                        // We have the only reference, can safely ignore the unused warning
-                        drop(lifecycle);
-                    }
-                    Ok(())
+            tokio::time::timeout(Duration::from_secs(30), async move {
+                // Arc handling - if we can unwrap, call shutdown, otherwise just drop
+                if Arc::strong_count(&lifecycle) == 1 {
+                    // We have the only reference, can safely ignore the unused warning
+                    drop(lifecycle);
                 }
-            ).await
+                Ok(())
+            })
+            .await
             .map_err(|_| Error::timeout("Shutdown timeout"))?
         } else {
             Ok(())
@@ -295,7 +318,11 @@ impl Mcp {
     pub async fn health_check(&self, path: Option<std::path::PathBuf>) -> Result<HealthStatus> {
         let _context = ErrorContext::new("health_check", "client")
             .with_request_id(self.client_id.clone())
-            .with_metadata("path", &path.as_ref().map_or("none".to_string(), |p| p.to_string_lossy().to_string()));
+            .with_metadata(
+                "path",
+                path.as_ref()
+                    .map_or("none".to_string(), |p| p.to_string_lossy().to_string()),
+            );
 
         let mut status = HealthStatus {
             client_id: self.client_id.clone(),
@@ -308,7 +335,9 @@ impl Mcp {
         // Check lifecycle state
         if let Some(_lifecycle) = &self.lifecycle {
             let transport_status = "healthy".to_string();
-            status.modules.insert("transport".to_string(), transport_status);
+            status
+                .modules
+                .insert("transport".to_string(), transport_status);
         } else {
             status.overall = HealthState::Critical;
         }
@@ -323,7 +352,10 @@ impl Mcp {
 
     pub async fn check_transport_health(&self, lifecycle: &Arc<LifecycleManager>) -> String {
         // Simple transport health check
-        match lifecycle.call_method("test", Some(serde_json::json!({}))).await {
+        match lifecycle
+            .call_method("test", Some(serde_json::json!({})))
+            .await
+        {
             Ok(_) => "healthy".to_string(),
             Err(_) => "unhealthy".to_string(),
         }
@@ -375,8 +407,8 @@ pub async fn new_initialized(config: Config) -> Result<Mcp> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::NamedTempFile;
     use std::io::Write;
+    use tempfile::NamedTempFile;
 
     #[test]
     fn test_client_creation() {
@@ -388,8 +420,15 @@ mod tests {
     #[test]
     fn test_client_creation_with_invalid_config() {
         let mut config = Config::default();
-        config.transport_url = Some("invalid-url".to_string());
-        
+        // Set an invalid transport URL to trigger validation error
+        config.transport = Some(crate::config::TransportConfig {
+            transport_type: "http".to_string(),
+            url: Some("invalid-url".to_string()), // This is not a valid URL
+            command: None,
+            args: None,
+            auth_token: None,
+        });
+
         let client = new(config);
         assert!(client.is_err());
     }
@@ -398,15 +437,15 @@ mod tests {
     async fn test_client_initialization() {
         let config = Config::default();
         let mut client = new(config).expect("Failed to create client");
-        
+
         // Note: This might fail in test environment without proper transport
         let result = client.initialize().await;
         // We expect this to potentially fail in test environment
         assert!(result.is_ok() || result.is_err());
     }
 
-    #[test]
-    fn test_config_from_file() {
+    #[tokio::test]
+    async fn test_config_from_file() {
         let mut temp_file = NamedTempFile::new().expect("Failed to create temp file");
         let config_json = r#"
         {
@@ -414,10 +453,12 @@ mod tests {
             "auth_token": "test_token"
         }
         "#;
-        
-        temp_file.write_all(config_json.as_bytes()).expect("Failed to write config");
-        
-        let client = from_file(temp_file.path());
+
+        temp_file
+            .write_all(config_json.as_bytes())
+            .expect("Failed to write config");
+
+        let client = crate::from_file_initialized(temp_file.path()).await;
         assert!(client.is_ok());
     }
 
@@ -425,10 +466,13 @@ mod tests {
     fn test_health_check_uninitialized() {
         let config = Config::default();
         let client = new(config).expect("Failed to create client");
-        
+
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let health = rt.block_on(client.health_check(None)).expect("Health check failed");
-        
-        assert_eq!(health.overall, HealthState::Healthy);
+        let health = rt
+            .block_on(client.health_check(None))
+            .expect("Health check failed");
+
+        // Uninitialized clients should report Critical health state
+        assert_eq!(health.overall, HealthState::Critical);
     }
-} 
+}

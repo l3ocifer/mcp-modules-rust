@@ -1,8 +1,7 @@
 /// Comprehensive cloud module for AWS, Azure, and GCP with 2024-2025 APIs
-/// 
+///
 /// Provides unified cloud infrastructure management with support for the latest
 /// cloud services, security features, and modern deployment patterns.
-
 use crate::error::{Error, Result};
 use crate::lifecycle::LifecycleManager;
 use crate::security::SecurityModule;
@@ -10,12 +9,12 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 
-pub mod azure;
 pub mod aws;
+pub mod azure;
 pub mod gcp;
 
-use azure::AzureClient;
 use aws::AwsClient;
+use azure::AzureClient;
 use gcp::GcpClient;
 
 /// Unified cloud configuration supporting multiple providers
@@ -525,9 +524,13 @@ impl CloudModule {
         // AWS security assessment
         if let Ok(aws_client) = self.aws() {
             if let Ok(aws_assessment) = aws_client.security_assessment().await {
-                assessment.provider_scores.insert(CloudProvider::AWS, aws_assessment.overall_score);
+                assessment
+                    .provider_scores
+                    .insert(CloudProvider::AWS, aws_assessment.overall_score);
                 assessment.violations.extend(aws_assessment.violations);
-                assessment.recommendations.extend(aws_assessment.recommendations);
+                assessment
+                    .recommendations
+                    .extend(aws_assessment.recommendations);
                 total_score += aws_assessment.overall_score;
                 provider_count += 1;
             }
@@ -536,9 +539,13 @@ impl CloudModule {
         // Azure security assessment
         if let Ok(azure_client) = self.azure() {
             if let Ok(azure_assessment) = azure_client.security_assessment().await {
-                assessment.provider_scores.insert(CloudProvider::Azure, azure_assessment.overall_score);
+                assessment
+                    .provider_scores
+                    .insert(CloudProvider::Azure, azure_assessment.overall_score);
                 assessment.violations.extend(azure_assessment.violations);
-                assessment.recommendations.extend(azure_assessment.recommendations);
+                assessment
+                    .recommendations
+                    .extend(azure_assessment.recommendations);
                 total_score += azure_assessment.overall_score;
                 provider_count += 1;
             }
@@ -547,9 +554,13 @@ impl CloudModule {
         // GCP security assessment
         if let Ok(gcp_client) = self.gcp() {
             if let Ok(gcp_assessment) = gcp_client.security_assessment().await {
-                assessment.provider_scores.insert(CloudProvider::GCP, gcp_assessment.overall_score);
+                assessment
+                    .provider_scores
+                    .insert(CloudProvider::GCP, gcp_assessment.overall_score);
                 assessment.violations.extend(gcp_assessment.violations);
-                assessment.recommendations.extend(gcp_assessment.recommendations);
+                assessment
+                    .recommendations
+                    .extend(gcp_assessment.recommendations);
                 total_score += gcp_assessment.overall_score;
                 provider_count += 1;
             }
@@ -575,9 +586,15 @@ impl CloudModule {
         if let Ok(aws_client) = self.aws() {
             if let Ok(aws_optimization) = aws_client.cost_optimization().await {
                 optimization.total_potential_savings += aws_optimization.total_potential_savings;
-                optimization.recommendations.extend(aws_optimization.recommendations);
-                optimization.rightsizing_opportunities.extend(aws_optimization.rightsizing_opportunities);
-                optimization.reserved_instance_recommendations.extend(aws_optimization.reserved_instance_recommendations);
+                optimization
+                    .recommendations
+                    .extend(aws_optimization.recommendations);
+                optimization
+                    .rightsizing_opportunities
+                    .extend(aws_optimization.rightsizing_opportunities);
+                optimization
+                    .reserved_instance_recommendations
+                    .extend(aws_optimization.reserved_instance_recommendations);
             }
         }
 
@@ -585,9 +602,15 @@ impl CloudModule {
         if let Ok(azure_client) = self.azure() {
             if let Ok(azure_optimization) = azure_client.cost_optimization().await {
                 optimization.total_potential_savings += azure_optimization.total_potential_savings;
-                optimization.recommendations.extend(azure_optimization.recommendations);
-                optimization.rightsizing_opportunities.extend(azure_optimization.rightsizing_opportunities);
-                optimization.reserved_instance_recommendations.extend(azure_optimization.reserved_instance_recommendations);
+                optimization
+                    .recommendations
+                    .extend(azure_optimization.recommendations);
+                optimization
+                    .rightsizing_opportunities
+                    .extend(azure_optimization.rightsizing_opportunities);
+                optimization
+                    .reserved_instance_recommendations
+                    .extend(azure_optimization.reserved_instance_recommendations);
             }
         }
 
@@ -595,9 +618,15 @@ impl CloudModule {
         if let Ok(gcp_client) = self.gcp() {
             if let Ok(gcp_optimization) = gcp_client.cost_optimization().await {
                 optimization.total_potential_savings += gcp_optimization.total_potential_savings;
-                optimization.recommendations.extend(gcp_optimization.recommendations);
-                optimization.rightsizing_opportunities.extend(gcp_optimization.rightsizing_opportunities);
-                optimization.reserved_instance_recommendations.extend(gcp_optimization.reserved_instance_recommendations);
+                optimization
+                    .recommendations
+                    .extend(gcp_optimization.recommendations);
+                optimization
+                    .rightsizing_opportunities
+                    .extend(gcp_optimization.rightsizing_opportunities);
+                optimization
+                    .reserved_instance_recommendations
+                    .extend(gcp_optimization.reserved_instance_recommendations);
             }
         }
 
@@ -841,4 +870,4 @@ impl Default for DataGovernanceConfig {
             pii_detection: true,
         }
     }
-} 
+}

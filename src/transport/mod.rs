@@ -1,8 +1,8 @@
-use serde_json::Value;
-use serde::{Serialize, Deserialize};
 use async_trait::async_trait;
-use std::pin::Pin;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -12,9 +12,9 @@ pub mod mock;
 pub mod stdio;
 pub mod websocket;
 
+pub use mock::MockTransport;
 pub use stdio::StdioTransport;
 pub use websocket::WebSocketTransport;
-pub use mock::MockTransport;
 
 /// MCP protocol version header
 pub const MCP_VERSION_HEADER: &str = "X-MCP-Version";
@@ -27,39 +27,42 @@ pub const MCP_PROTOCOL_VERSION: &str = "2025-06-18";
 pub enum TransportError {
     #[error("Connection error: {0}")]
     ConnectionError(String),
-    
+
     #[error("Authentication failed: {0}")]
     AuthenticationFailed(String),
-    
+
     #[error("Request failed: {0}")]
     RequestFailed(String),
-    
+
     #[error("Serialization error: {0}")]
     SerializationError(String),
-    
+
     #[error("Protocol error {code}: {message}")]
     Protocol { message: String, code: i32 },
-    
+
     #[error("Send error: {0}")]
     SendError(String),
-    
+
     #[error("Receive error: {0}")]
     ReceiveError(String),
-    
+
     #[error("Parse error: {0}")]
     ParseError(String),
-    
+
     #[error("Timeout: {0}")]
     Timeout(String),
-    
+
     #[error("Rate limit exceeded: {0}")]
     RateLimitExceeded(String),
-    
+
     #[error("Transport not supported: {0}")]
     NotSupported(String),
-    
+
     #[error("Request timeout: {message}")]
-    RequestTimeout { message: String, duration: Option<std::time::Duration> },
+    RequestTimeout {
+        message: String,
+        duration: Option<std::time::Duration>,
+    },
 }
 
 impl TransportError {
@@ -90,13 +93,13 @@ impl TransportError {
 
     /// Check if error is retryable for performance optimization
     pub fn is_retryable(&self) -> bool {
-        match self {
-            TransportError::ConnectionError(_) => true,
-            TransportError::Timeout(_) => true,
-            TransportError::RequestTimeout { .. } => true,
-            TransportError::RateLimitExceeded(_) => true,
-            _ => false,
-        }
+        matches!(
+            self,
+            TransportError::ConnectionError(_)
+                | TransportError::Timeout(_)
+                | TransportError::RequestTimeout { .. }
+                | TransportError::RateLimitExceeded(_)
+        )
     }
 }
 
@@ -104,21 +107,62 @@ impl TransportError {
 impl From<TransportError> for crate::error::TransportError {
     fn from(err: TransportError) -> Self {
         match err {
-            TransportError::ConnectionError(msg) => crate::error::TransportError::ConnectionFailed { message: msg, retry_count: None },
-            TransportError::AuthenticationFailed(msg) => crate::error::TransportError::AuthenticationFailed { message: msg, auth_type: None },
-            TransportError::RequestFailed(msg) => crate::error::TransportError::RequestFailed { message: msg, method: None },
-            TransportError::SerializationError(msg) => crate::error::TransportError::Serialization { message: msg, format: Some("JSON".to_string()) },
-            TransportError::SendError(msg) => crate::error::TransportError::ConnectionFailed { message: msg, retry_count: None },
-            TransportError::ReceiveError(msg) => crate::error::TransportError::ConnectionFailed { message: msg, retry_count: None },
-            TransportError::ParseError(msg) => crate::error::TransportError::Serialization { message: msg, format: Some("JSON-RPC".to_string()) },
-            TransportError::Timeout(msg) => crate::error::TransportError::RequestTimeout { 
-                message: msg, 
-                duration: Some(std::time::Duration::from_secs(30)) 
+            TransportError::ConnectionError(msg) => {
+                crate::error::TransportError::ConnectionFailed {
+                    message: msg,
+                    retry_count: None,
+                }
+            }
+            TransportError::AuthenticationFailed(msg) => {
+                crate::error::TransportError::AuthenticationFailed {
+                    message: msg,
+                    auth_type: None,
+                }
+            }
+            TransportError::RequestFailed(msg) => crate::error::TransportError::RequestFailed {
+                message: msg,
+                method: None,
             },
-            TransportError::NotSupported(msg) => crate::error::TransportError::NotSupported { transport_type: msg },
-            TransportError::RateLimitExceeded(msg) => crate::error::TransportError::RateLimitExceeded { message: msg, retry_after: None },
-            TransportError::RequestTimeout { message, duration } => crate::error::TransportError::RequestTimeout { message, duration },
-            TransportError::Protocol { message, code } => crate::error::TransportError::Serialization { message: format!("Protocol error {}: {}", code, message), format: Some("JSON-RPC".to_string()) },
+            TransportError::SerializationError(msg) => {
+                crate::error::TransportError::Serialization {
+                    message: msg,
+                    format: Some("JSON".to_string()),
+                }
+            }
+            TransportError::SendError(msg) => crate::error::TransportError::ConnectionFailed {
+                message: msg,
+                retry_count: None,
+            },
+            TransportError::ReceiveError(msg) => crate::error::TransportError::ConnectionFailed {
+                message: msg,
+                retry_count: None,
+            },
+            TransportError::ParseError(msg) => crate::error::TransportError::Serialization {
+                message: msg,
+                format: Some("JSON-RPC".to_string()),
+            },
+            TransportError::Timeout(msg) => crate::error::TransportError::RequestTimeout {
+                message: msg,
+                duration: Some(std::time::Duration::from_secs(30)),
+            },
+            TransportError::NotSupported(msg) => crate::error::TransportError::NotSupported {
+                transport_type: msg,
+            },
+            TransportError::RateLimitExceeded(msg) => {
+                crate::error::TransportError::RateLimitExceeded {
+                    message: msg,
+                    retry_after: None,
+                }
+            }
+            TransportError::RequestTimeout { message, duration } => {
+                crate::error::TransportError::RequestTimeout { message, duration }
+            }
+            TransportError::Protocol { message, code } => {
+                crate::error::TransportError::Serialization {
+                    message: format!("Protocol error {}: {}", code, message),
+                    format: Some("JSON-RPC".to_string()),
+                }
+            }
         }
     }
 }
@@ -126,14 +170,30 @@ impl From<TransportError> for crate::error::TransportError {
 impl From<crate::error::TransportError> for TransportError {
     fn from(err: crate::error::TransportError) -> Self {
         match err {
-            crate::error::TransportError::ConnectionFailed { message, .. } => TransportError::ConnectionError(message),
-            crate::error::TransportError::AuthenticationFailed { message, .. } => TransportError::AuthenticationFailed(message),
-            crate::error::TransportError::RequestFailed { message, .. } => TransportError::RequestFailed(message),
-            crate::error::TransportError::Serialization { message, .. } => TransportError::SerializationError(message),
-            crate::error::TransportError::RateLimitExceeded { message, .. } => TransportError::RateLimitExceeded(message),
-            crate::error::TransportError::NotSupported { transport_type } => TransportError::NotSupported(transport_type),
-            crate::error::TransportError::RequestTimeout { message, duration } => TransportError::RequestTimeout { message, duration },
-            crate::error::TransportError::Protocol { message, code } => TransportError::ParseError(format!("Protocol error {}: {}", code, message)),
+            crate::error::TransportError::ConnectionFailed { message, .. } => {
+                TransportError::ConnectionError(message)
+            }
+            crate::error::TransportError::AuthenticationFailed { message, .. } => {
+                TransportError::AuthenticationFailed(message)
+            }
+            crate::error::TransportError::RequestFailed { message, .. } => {
+                TransportError::RequestFailed(message)
+            }
+            crate::error::TransportError::Serialization { message, .. } => {
+                TransportError::SerializationError(message)
+            }
+            crate::error::TransportError::RateLimitExceeded { message, .. } => {
+                TransportError::RateLimitExceeded(message)
+            }
+            crate::error::TransportError::NotSupported { transport_type } => {
+                TransportError::NotSupported(transport_type)
+            }
+            crate::error::TransportError::RequestTimeout { message, duration } => {
+                TransportError::RequestTimeout { message, duration }
+            }
+            crate::error::TransportError::Protocol { message, code } => {
+                TransportError::ParseError(format!("Protocol error {}: {}", code, message))
+            }
         }
     }
 }
@@ -160,25 +220,37 @@ impl Notification {
 }
 
 /// Notification handler function type
-pub type NotificationHandler = Arc<dyn Fn(String, Value) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
+pub type NotificationHandler =
+    Arc<dyn Fn(String, Value) -> Pin<Box<dyn Future<Output = ()> + Send>> + Send + Sync>;
 
 /// Transport trait for Model Context Protocol
 #[async_trait]
 pub trait Transport: Send + Sync + std::fmt::Debug {
     /// Connect to the server
     async fn connect(&mut self) -> std::result::Result<(), TransportError>;
-    
+
     /// Disconnect from the server
     async fn disconnect(&mut self) -> std::result::Result<(), TransportError>;
-    
+
     /// Send a request and wait for response
-    async fn request(&mut self, method: &str, params: Option<Value>) -> std::result::Result<Value, TransportError>;
-    
+    async fn request(
+        &mut self,
+        method: &str,
+        params: Option<Value>,
+    ) -> std::result::Result<Value, TransportError>;
+
     /// Send a notification (no response expected)
-    async fn notify(&mut self, method: &str, params: Option<Value>) -> std::result::Result<(), TransportError>;
-    
+    async fn notify(
+        &mut self,
+        method: &str,
+        params: Option<Value>,
+    ) -> std::result::Result<(), TransportError>;
+
     /// Add a notification handler
-    async fn add_notification_handler(&mut self, handler: NotificationHandler) -> std::result::Result<(), TransportError>;
+    async fn add_notification_handler(
+        &mut self,
+        handler: NotificationHandler,
+    ) -> std::result::Result<(), TransportError>;
 }
 
 /// MCP transport definitions for structured content and resource links
@@ -210,4 +282,4 @@ pub struct ElicitationResponse {
     pub elicitation_id: String,
     pub response: String,
     pub metadata: Option<std::collections::HashMap<String, serde_json::Value>>,
-} 
+}

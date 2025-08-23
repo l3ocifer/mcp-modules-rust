@@ -1,5 +1,5 @@
 use crate::error::{Error, Result};
-use crate::transport::{Transport, TransportError, NotificationHandler};
+use crate::transport::{NotificationHandler, Transport, TransportError};
 use async_trait::async_trait;
 use reqwest::Client;
 use serde_json::Value;
@@ -42,7 +42,11 @@ impl Transport for HttpTransport {
         Ok(())
     }
 
-    async fn request(&mut self, method: &str, params: Option<Value>) -> std::result::Result<Value, TransportError> {
+    async fn request(
+        &mut self,
+        method: &str,
+        params: Option<Value>,
+    ) -> std::result::Result<Value, TransportError> {
         let request_body = serde_json::json!({
             "jsonrpc": "2.0",
             "id": 1,
@@ -50,20 +54,29 @@ impl Transport for HttpTransport {
             "params": params
         });
 
-        let response = self.client
+        let response = self
+            .client
             .post(&self.url)
             .json(&request_body)
             .send()
             .await
-            .map_err(|e| TransportError::connection_failed(format!("HTTP request failed: {}", e)))?;
+            .map_err(|e| {
+                TransportError::connection_failed(format!("HTTP request failed: {}", e))
+            })?;
 
-        let json: Value = response.json().await
+        let json: Value = response
+            .json()
+            .await
             .map_err(|e| TransportError::parse(format!("Failed to parse response: {}", e)))?;
 
         Ok(json)
     }
 
-    async fn notify(&mut self, method: &str, params: Option<Value>) -> std::result::Result<(), TransportError> {
+    async fn notify(
+        &mut self,
+        method: &str,
+        params: Option<Value>,
+    ) -> std::result::Result<(), TransportError> {
         let notification = serde_json::json!({
             "jsonrpc": "2.0",
             "method": method,
@@ -80,8 +93,11 @@ impl Transport for HttpTransport {
         Ok(())
     }
 
-    async fn add_notification_handler(&mut self, _handler: NotificationHandler) -> std::result::Result<(), TransportError> {
+    async fn add_notification_handler(
+        &mut self,
+        _handler: NotificationHandler,
+    ) -> std::result::Result<(), TransportError> {
         // HTTP transport doesn't support notifications
         Ok(())
     }
-} 
+}

@@ -1,10 +1,10 @@
 use crate::error::{Error, Result};
 use crate::lifecycle::LifecycleManager;
-use std::sync::Arc;
-use std::collections::HashMap;
-use serde::{Serialize, Deserialize};
-use serde_json::Value;
 use jsonschema::JSONSchema;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Content block for tool outputs with performance optimization
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -150,7 +150,10 @@ impl ToolExecutionResult {
     pub fn needs_elicitation(request: crate::transport::ElicitationRequest) -> Self {
         Self {
             success: false,
-            content: vec![ContentBlock::text(format!("Elicitation required: {}", request.prompt))],
+            content: vec![ContentBlock::text(format!(
+                "Elicitation required: {}",
+                request.prompt
+            ))],
             error: None,
             progress: None,
             elicitation_request: Some(request),
@@ -163,7 +166,10 @@ impl ToolExecutionResult {
     pub fn progress(progress: ProgressInfo) -> Self {
         Self {
             success: false,
-            content: vec![ContentBlock::text(format!("Progress: {}%", progress.percentage))],
+            content: vec![ContentBlock::text(format!(
+                "Progress: {}%",
+                progress.percentage
+            ))],
             error: None,
             progress: Some(progress),
             elicitation_request: None,
@@ -201,22 +207,25 @@ impl ToolDefinition {
     /// Create tool definition from JSON Schema (for compatibility)
     pub fn from_json_schema(
         name: &str,
-        description: &str, 
+        description: &str,
         category: &str,
         schema: Value,
-        annotation: Option<ToolAnnotation>
+        annotation: Option<ToolAnnotation>,
     ) -> Self {
         let mut tool = Self::new(name, description);
         tool.parameters = Some(schema);
-        
+
         // Add category to metadata
         let mut metadata = HashMap::new();
         metadata.insert("category".to_string(), Value::String(category.to_string()));
         if let Some(ann) = annotation {
-            metadata.insert("annotation".to_string(), serde_json::to_value(ann).unwrap_or(Value::Null));
+            metadata.insert(
+                "annotation".to_string(),
+                serde_json::to_value(ann).unwrap_or(Value::Null),
+            );
         }
         tool.metadata = Some(metadata);
-        
+
         tool
     }
 
@@ -261,10 +270,11 @@ impl SchemaValidator {
             match schema.validate(data) {
                 Ok(_) => Ok(()),
                 Err(errors) => {
-                    let error_messages: Vec<String> = errors
-                        .map(|e| e.to_string())
-                        .collect();
-                    Err(Error::validation(format!("Validation failed: {}", error_messages.join(", "))))
+                    let error_messages: Vec<String> = errors.map(|e| e.to_string()).collect();
+                    Err(Error::validation(format!(
+                        "Validation failed: {}",
+                        error_messages.join(", ")
+                    )))
                 }
             }
         } else {
@@ -340,7 +350,7 @@ impl ToolAnnotation {
         self.estimated_duration = Some(duration);
         self
     }
-} 
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolError {
@@ -361,4 +371,4 @@ impl ToolError {
             stack_trace: None,
         }
     }
-} 
+}

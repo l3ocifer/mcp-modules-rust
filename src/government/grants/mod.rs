@@ -1,8 +1,8 @@
 use crate::error::{Error, Result};
 use crate::lifecycle::LifecycleManager;
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use reqwest::Client;
 
 /// Grant agency information
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -128,11 +128,13 @@ impl<'a> GrantsClient<'a> {
 
     /// Search for government grants based on a query
     pub async fn search_grants(&self, params: GrantsSearchParams) -> Result<Vec<Grant>> {
-        let api_key = self.api_key.as_ref()
+        let api_key = self
+            .api_key
+            .as_ref()
             .ok_or_else(|| Error::config("Grants API key not provided"))?;
-            
+
         let url = "https://api.simpler.grants.gov/v1/opportunities/search";
-        
+
         let search_data = json!({
             "filters": {
                 "opportunity_status": {
@@ -147,8 +149,9 @@ impl<'a> GrantsClient<'a> {
             },
             "query": params.query
         });
-        
-        let response = self.client
+
+        let response = self
+            .client
             .post(url)
             .header("accept", "application/json")
             .header("X-Auth", api_key)
@@ -157,24 +160,31 @@ impl<'a> GrantsClient<'a> {
             .send()
             .await
             .map_err(|e| Error::internal(format!("Failed to send grants search request: {}", e)))?;
-            
+
         if !response.status().is_success() {
             let status = response.status();
-            let text = response.text().await
+            let text = response
+                .text()
+                .await
                 .unwrap_or_else(|_| "Unable to read error response".into());
-            return Err(Error::internal(format!("Grants API returned error {}: {}", status, text)));
+            return Err(Error::internal(format!(
+                "Grants API returned error {}: {}",
+                status, text
+            )));
         }
-        
-        let api_response: GrantsApiResponse = response.json()
+
+        let api_response: GrantsApiResponse = response
+            .json()
             .await
             .map_err(|e| Error::internal(format!("Failed to parse grants API response: {}", e)))?;
-            
+
         Ok(api_response.data)
     }
-    
+
     /// Format grant details as a string
     pub fn format_grant_details(&self, grant: &Grant) -> String {
-        format!(r#"
+        format!(
+            r#"
 OPPORTUNITY DETAILS
 ------------------
 Title: {}
@@ -214,32 +224,72 @@ Description:
 "#,
             grant.opportunity_title,
             grant.opportunity_number,
-            grant.agency_name, grant.agency_code,
+            grant.agency_name,
+            grant.agency_code,
             grant.opportunity_status,
-            grant.summary.award_floor.map_or("Not specified".to_string(), |v| format!("${}", v)),
-            grant.summary.award_ceiling.map_or("Not specified".to_string(), |v| format!("${}", v)),
+            grant
+                .summary
+                .award_floor
+                .map_or("Not specified".to_string(), |v| format!("${}", v)),
+            grant
+                .summary
+                .award_ceiling
+                .map_or("Not specified".to_string(), |v| format!("${}", v)),
             grant.category,
             grant.summary.post_date.as_deref().unwrap_or("N/A"),
             grant.summary.close_date.as_deref().unwrap_or("N/A"),
-            grant.summary.agency_contact_description.as_deref().unwrap_or("Not provided"),
-            grant.summary.agency_email_address.as_deref().unwrap_or("Not provided"),
-            grant.summary.agency_phone_number.as_deref().unwrap_or("Not provided"),
-            grant.summary.applicant_eligibility_description.as_deref().unwrap_or("Eligibility information not provided")
-                .replace("<[^>]*>", "").trim(),
-            grant.summary.additional_info_url.as_deref().unwrap_or("Not available"),
-            grant.summary.summary_description.as_deref().unwrap_or("No description available")
-                .replace("<[^>]*>", "").trim()
+            grant
+                .summary
+                .agency_contact_description
+                .as_deref()
+                .unwrap_or("Not provided"),
+            grant
+                .summary
+                .agency_email_address
+                .as_deref()
+                .unwrap_or("Not provided"),
+            grant
+                .summary
+                .agency_phone_number
+                .as_deref()
+                .unwrap_or("Not provided"),
+            grant
+                .summary
+                .applicant_eligibility_description
+                .as_deref()
+                .unwrap_or("Eligibility information not provided")
+                .replace("<[^>]*>", "")
+                .trim(),
+            grant
+                .summary
+                .additional_info_url
+                .as_deref()
+                .unwrap_or("Not available"),
+            grant
+                .summary
+                .summary_description
+                .as_deref()
+                .unwrap_or("No description available")
+                .replace("<[^>]*>", "")
+                .trim()
         )
     }
-    
+
     /// Create a summary of search results
-    pub fn create_summary(&self, grants: &[Grant], search_query: &str, page: u32, grants_per_page: u32) -> String {
+    pub fn create_summary(
+        &self,
+        grants: &[Grant],
+        search_query: &str,
+        page: u32,
+        grants_per_page: u32,
+    ) -> String {
         let start_idx = (page as usize - 1) * grants_per_page as usize;
         let end_idx = start_idx + grants_per_page as usize;
         let displayed_grants = &grants[start_idx.min(grants.len())..end_idx.min(grants.len())];
         let total_pages = (grants.len() as f64 / grants_per_page as f64).ceil() as u32;
 
-        let mut summary = format!(r#"Search Results for "{}":
+        let mut summary = format!(
+            r#"Search Results for "{}":
 
 OVERVIEW
 --------
@@ -263,37 +313,38 @@ DETAILED GRANT LISTINGS
             summary.push_str(&self.format_grant_details(grant));
         }
 
-        summary.push_str(&format!("\nNote: Showing {} grants per page. Total grants available: {}", 
-            grants_per_page, grants.len()));
-            
+        summary.push_str(&format!(
+            "\nNote: Showing {} grants per page. Total grants available: {}",
+            grants_per_page,
+            grants.len()
+        ));
+
         summary
     }
-    
+
     /// Get registered tools
     pub fn get_tools(&self) -> Vec<(String, String, serde_json::Value)> {
-        vec![
-            (
-                "search_grants".to_string(),
-                "Search for government grants based on keywords".to_string(),
-                serde_json::json!({
-                    "type": "object",
-                    "required": ["query"],
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "Search query for grants (e.g., 'Artificial intelligence', 'Climate change')"
-                        },
-                        "page": {
-                            "type": "integer",
-                            "description": "Page number for pagination (default: 1)"
-                        },
-                        "grants_per_page": {
-                            "type": "integer",
-                            "description": "Number of grants per page (default: 3)"
-                        }
+        vec![(
+            "search_grants".to_string(),
+            "Search for government grants based on keywords".to_string(),
+            serde_json::json!({
+                "type": "object",
+                "required": ["query"],
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query for grants (e.g., 'Artificial intelligence', 'Climate change')"
+                    },
+                    "page": {
+                        "type": "integer",
+                        "description": "Page number for pagination (default: 1)"
+                    },
+                    "grants_per_page": {
+                        "type": "integer",
+                        "description": "Number of grants per page (default: 3)"
                     }
-                }),
-            ),
-        ]
+                }
+            }),
+        )]
     }
-} 
+}

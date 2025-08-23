@@ -1,5 +1,5 @@
 /// GCP client module with comprehensive 2024-2025 API support
-/// 
+///
 /// Provides access to latest GCP services including:
 /// - Vertex AI and Gemini integration
 /// - Cloud Run with 2nd gen runtime
@@ -7,13 +7,10 @@
 /// - BigQuery with fine-grained access control
 /// - Anthos for hybrid/multi-cloud
 /// - Cloud Security Command Center
-
 use crate::cloud::{
-    GcpConfig, CloudResource, CloudProvider, SecurityAssessment, CostOptimization,
-    SecurityViolation, SecurityRecommendation, CostRecommendation,
-    ReservedInstanceRecommendation,
-    ViolationSeverity, RecommendationPriority, ComplexityLevel,
-    ReservedInstanceTerm, PaymentOption,
+    CloudProvider, CloudResource, ComplexityLevel, CostOptimization, CostRecommendation, GcpConfig,
+    PaymentOption, RecommendationPriority, ReservedInstanceRecommendation, ReservedInstanceTerm,
+    SecurityAssessment, SecurityRecommendation, SecurityViolation, ViolationSeverity,
 };
 use crate::error::{Error, Result};
 use crate::lifecycle::LifecycleManager;
@@ -1227,9 +1224,9 @@ impl GcpClient {
     pub fn new(config: GcpConfig, lifecycle: Arc<LifecycleManager>) -> Result<Self> {
         // Validate gcloud CLI availability
         Self::check_gcloud_cli()?;
-        
+
         let current_project = config.project_id.clone();
-        
+
         Ok(Self {
             config,
             lifecycle,
@@ -1237,57 +1234,59 @@ impl GcpClient {
             current_project,
         })
     }
-    
+
     /// Check if gcloud CLI is available and configured
     fn check_gcloud_cli() -> Result<()> {
         let output = std::process::Command::new("gcloud")
             .arg("--version")
             .output()
             .map_err(|_| Error::config("gcloud CLI not found. Please install Google Cloud SDK"))?;
-            
+
         if !output.status.success() {
             return Err(Error::config("gcloud CLI not properly configured"));
         }
-        
+
         Ok(())
     }
-    
+
     /// Execute gcloud command with proper authentication
     async fn execute_gcloud_command(&self, args: &[&str]) -> Result<String> {
         let mut cmd = Command::new("gcloud");
-        
+
         // Add project
-        cmd.args(&["--project", &self.current_project]);
-        
+        cmd.args(["--project", &self.current_project]);
+
         // Add format for consistent output
-        cmd.args(&["--format", "json"]);
-        
+        cmd.args(["--format", "json"]);
+
         // Add arguments
         cmd.args(args);
-        
+
         // Execute command
-        let output = cmd.output().await
+        let output = cmd
+            .output()
+            .await
             .map_err(|e| Error::internal(format!("Failed to execute gcloud command: {}", e)))?;
-            
+
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             return Err(Error::service(format!("gcloud command failed: {}", stderr)));
         }
-        
+
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
-    
+
     /// List all cloud resources across services
     pub async fn list_resources(&self) -> Result<Vec<CloudResource>> {
         let mut resources = Vec::new();
-        
+
         // Compute Engine instances
         if let Ok(instances) = self.list_compute_instances().await {
             for instance in instances {
                 let mut labels = instance.labels.clone();
                 labels.insert("ResourceType".to_string(), "ComputeInstance".to_string());
                 labels.insert("MachineType".to_string(), instance.machine_type.clone());
-                
+
                 resources.push(CloudResource {
                     id: instance.self_link.clone(),
                     name: instance.name.clone(),
@@ -1305,13 +1304,13 @@ impl GcpClient {
                 });
             }
         }
-        
+
         // Cloud Run services
         if let Ok(services) = self.list_cloud_run_services().await {
             for service in services {
                 let mut labels = service.labels.clone();
                 labels.insert("ResourceType".to_string(), "CloudRunService".to_string());
-                
+
                 resources.push(CloudResource {
                     id: service.self_link.clone(),
                     name: service.name.clone(),
@@ -1329,23 +1328,26 @@ impl GcpClient {
                 });
             }
         }
-        
+
         // Cloud Storage buckets
         if let Ok(buckets) = self.list_gcs_buckets().await {
             for bucket in buckets {
                 let mut labels = bucket.labels.clone();
                 labels.insert("ResourceType".to_string(), "StorageBucket".to_string());
                 labels.insert("StorageClass".to_string(), bucket.storage_class.clone());
-                
-                let security_score = if bucket.encryption.is_some() && 
-                    bucket.iam_configuration.as_ref()
+
+                let security_score = if bucket.encryption.is_some()
+                    && bucket
+                        .iam_configuration
+                        .as_ref()
                         .and_then(|iac| iac.uniform_bucket_level_access.as_ref())
-                        .map_or(false, |ubla| ubla.enabled) {
+                        .is_some_and(|ubla| ubla.enabled)
+                {
                     85.0
                 } else {
                     60.0
                 };
-                
+
                 resources.push(CloudResource {
                     id: bucket.self_link.clone(),
                     name: bucket.name.clone(),
@@ -1363,71 +1365,121 @@ impl GcpClient {
                 });
             }
         }
-        
+
         Ok(resources)
     }
-    
+
     /// List Compute Engine instances
     pub async fn list_compute_instances(&self) -> Result<Vec<ComputeInstance>> {
-        let output = self.execute_gcloud_command(&[
-            "compute", "instances", "list"
-        ]).await?;
-        
+        let output = self
+            .execute_gcloud_command(&["compute", "instances", "list"])
+            .await?;
+
         let instances_data: serde_json::Value = serde_json::from_str(&output)
             .map_err(|e| Error::parsing(format!("Failed to parse compute instances: {}", e)))?;
-        
+
         let mut instances = Vec::new();
-        
+
         if let Some(instances_array) = instances_data.as_array() {
             for instance_data in instances_array {
                 // Parse the instance data - this is a simplified version
                 // In a real implementation, you'd need to handle all the nested structures
                 instances.push(ComputeInstance {
-                    id: instance_data.get("id").and_then(|i| i.as_str()).unwrap_or("").to_string(),
-                    name: instance_data.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string(),
-                    machine_type: instance_data.get("machineType").and_then(|mt| mt.as_str()).unwrap_or("").to_string(),
-                    status: instance_data.get("status").and_then(|s| s.as_str()).unwrap_or("").to_string(),
-                    zone: instance_data.get("zone").and_then(|z| z.as_str()).unwrap_or("").to_string(),
+                    id: instance_data
+                        .get("id")
+                        .and_then(|i| i.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    name: instance_data
+                        .get("name")
+                        .and_then(|n| n.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    machine_type: instance_data
+                        .get("machineType")
+                        .and_then(|mt| mt.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    status: instance_data
+                        .get("status")
+                        .and_then(|s| s.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    zone: instance_data
+                        .get("zone")
+                        .and_then(|z| z.as_str())
+                        .unwrap_or("")
+                        .to_string(),
                     network_interfaces: Vec::new(), // Would need detailed parsing
-                    disks: Vec::new(), // Would need detailed parsing
+                    disks: Vec::new(),              // Would need detailed parsing
                     tags: Vec::new(),
                     labels: HashMap::new(),
                     service_accounts: Vec::new(),
                     scheduling: None,
                     metadata: None,
-                    creation_timestamp: instance_data.get("creationTimestamp").and_then(|ct| ct.as_str()).unwrap_or("").to_string(),
-                    self_link: instance_data.get("selfLink").and_then(|sl| sl.as_str()).unwrap_or("").to_string(),
-                    cpu_platform: instance_data.get("cpuPlatform").and_then(|cp| cp.as_str()).map(|s| s.to_string()),
+                    creation_timestamp: instance_data
+                        .get("creationTimestamp")
+                        .and_then(|ct| ct.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    self_link: instance_data
+                        .get("selfLink")
+                        .and_then(|sl| sl.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    cpu_platform: instance_data
+                        .get("cpuPlatform")
+                        .and_then(|cp| cp.as_str())
+                        .map(|s| s.to_string()),
                     confidential_instance_config: None,
                     is_spot: false, // Would need to check scheduling
                 });
             }
         }
-        
+
         Ok(instances)
     }
-    
+
     /// List Cloud Run services
     pub async fn list_cloud_run_services(&self) -> Result<Vec<CloudRunService>> {
-        let output = self.execute_gcloud_command(&[
-            "run", "services", "list", "--platform", "managed"
-        ]).await?;
-        
+        let output = self
+            .execute_gcloud_command(&["run", "services", "list", "--platform", "managed"])
+            .await?;
+
         let services_data: serde_json::Value = serde_json::from_str(&output)
             .map_err(|e| Error::parsing(format!("Failed to parse Cloud Run services: {}", e)))?;
-        
+
         let mut services = Vec::new();
-        
+
         if let Some(services_array) = services_data.as_array() {
             for service_data in services_array {
                 // Simplified parsing - real implementation would handle all nested structures
                 services.push(CloudRunService {
-                    name: service_data.get("metadata").and_then(|m| m.get("name")).and_then(|n| n.as_str()).unwrap_or("").to_string(),
-                    namespace: service_data.get("metadata").and_then(|m| m.get("namespace")).and_then(|n| n.as_str()).unwrap_or("").to_string(),
-                    generation: service_data.get("metadata").and_then(|m| m.get("generation")).and_then(|g| g.as_i64()).unwrap_or(0),
+                    name: service_data
+                        .get("metadata")
+                        .and_then(|m| m.get("name"))
+                        .and_then(|n| n.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    namespace: service_data
+                        .get("metadata")
+                        .and_then(|m| m.get("namespace"))
+                        .and_then(|n| n.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    generation: service_data
+                        .get("metadata")
+                        .and_then(|m| m.get("generation"))
+                        .and_then(|g| g.as_i64())
+                        .unwrap_or(0),
                     labels: HashMap::new(),
                     annotations: HashMap::new(),
-                    creation_timestamp: service_data.get("metadata").and_then(|m| m.get("creationTimestamp")).and_then(|ct| ct.as_str()).unwrap_or("").to_string(),
+                    creation_timestamp: service_data
+                        .get("metadata")
+                        .and_then(|m| m.get("creationTimestamp"))
+                        .and_then(|ct| ct.as_str())
+                        .unwrap_or("")
+                        .to_string(),
                     spec: CloudRunServiceSpec {
                         template: CloudRunRevisionTemplate {
                             metadata: CloudRunRevisionTemplateMetadata {
@@ -1450,37 +1502,63 @@ impl GcpClient {
                         latest_ready_revision_name: None,
                         latest_created_revision_name: None,
                         traffic: Vec::new(),
-                        url: service_data.get("status").and_then(|s| s.get("url")).and_then(|u| u.as_str()).map(|s| s.to_string()),
+                        url: service_data
+                            .get("status")
+                            .and_then(|s| s.get("url"))
+                            .and_then(|u| u.as_str())
+                            .map(|s| s.to_string()),
                         address: None,
                     },
                     self_link: "".to_string(),
-                    region: service_data.get("metadata").and_then(|m| m.get("labels")).and_then(|l| l.get("cloud.googleapis.com/location")).and_then(|loc| loc.as_str()).unwrap_or("").to_string(),
+                    region: service_data
+                        .get("metadata")
+                        .and_then(|m| m.get("labels"))
+                        .and_then(|l| l.get("cloud.googleapis.com/location"))
+                        .and_then(|loc| loc.as_str())
+                        .unwrap_or("")
+                        .to_string(),
                 });
             }
         }
-        
+
         Ok(services)
     }
-    
+
     /// List Cloud Storage buckets
     pub async fn list_gcs_buckets(&self) -> Result<Vec<GcsBucket>> {
-        let output = self.execute_gcloud_command(&[
-            "storage", "buckets", "list"
-        ]).await?;
-        
+        let output = self
+            .execute_gcloud_command(&["storage", "buckets", "list"])
+            .await?;
+
         let buckets_data: serde_json::Value = serde_json::from_str(&output)
             .map_err(|e| Error::parsing(format!("Failed to parse GCS buckets: {}", e)))?;
-        
+
         let mut buckets = Vec::new();
-        
+
         if let Some(buckets_array) = buckets_data.as_array() {
             for bucket_data in buckets_array {
                 // Simplified parsing
                 buckets.push(GcsBucket {
-                    name: bucket_data.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string(),
-                    location: bucket_data.get("location").and_then(|l| l.as_str()).unwrap_or("").to_string(),
-                    location_type: bucket_data.get("locationType").and_then(|lt| lt.as_str()).unwrap_or("").to_string(),
-                    storage_class: bucket_data.get("storageClass").and_then(|sc| sc.as_str()).unwrap_or("STANDARD").to_string(),
+                    name: bucket_data
+                        .get("name")
+                        .and_then(|n| n.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    location: bucket_data
+                        .get("location")
+                        .and_then(|l| l.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    location_type: bucket_data
+                        .get("locationType")
+                        .and_then(|lt| lt.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    storage_class: bucket_data
+                        .get("storageClass")
+                        .and_then(|sc| sc.as_str())
+                        .unwrap_or("STANDARD")
+                        .to_string(),
                     versioning: None,
                     lifecycle: None,
                     encryption: None,
@@ -1489,24 +1567,39 @@ impl GcpClient {
                     website: None,
                     cors: Vec::new(),
                     labels: HashMap::new(),
-                    time_created: bucket_data.get("timeCreated").and_then(|tc| tc.as_str()).unwrap_or("").to_string(),
-                    updated: bucket_data.get("updated").and_then(|u| u.as_str()).unwrap_or("").to_string(),
-                    metageneration: bucket_data.get("metageneration").and_then(|mg| mg.as_i64()).unwrap_or(0),
-                    self_link: bucket_data.get("selfLink").and_then(|sl| sl.as_str()).unwrap_or("").to_string(),
+                    time_created: bucket_data
+                        .get("timeCreated")
+                        .and_then(|tc| tc.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    updated: bucket_data
+                        .get("updated")
+                        .and_then(|u| u.as_str())
+                        .unwrap_or("")
+                        .to_string(),
+                    metageneration: bucket_data
+                        .get("metageneration")
+                        .and_then(|mg| mg.as_i64())
+                        .unwrap_or(0),
+                    self_link: bucket_data
+                        .get("selfLink")
+                        .and_then(|sl| sl.as_str())
+                        .unwrap_or("")
+                        .to_string(),
                     project_number: 0,
                 });
             }
         }
-        
+
         Ok(buckets)
     }
-    
+
     /// Perform comprehensive security assessment
     pub async fn security_assessment(&self) -> Result<SecurityAssessment> {
         let mut violations = Vec::new();
         let mut recommendations = Vec::new();
         let mut total_score: f64 = 100.0;
-        
+
         // Check Compute Engine security
         if let Ok(instances) = self.list_compute_instances().await {
             for instance in instances {
@@ -1522,7 +1615,7 @@ impl GcpClient {
                     });
                     total_score -= 5.0;
                 }
-                
+
                 // Check OS login
                 if instance.metadata.is_none() {
                     recommendations.push(SecurityRecommendation {
@@ -1541,7 +1634,7 @@ impl GcpClient {
                 }
             }
         }
-        
+
         // Check Cloud Storage security
         if let Ok(buckets) = self.list_gcs_buckets().await {
             for bucket in buckets {
@@ -1551,15 +1644,19 @@ impl GcpClient {
                         resource_id: bucket.name.clone(),
                         rule_id: "GCS-001".to_string(),
                         severity: ViolationSeverity::High,
-                        description: "GCS bucket does not have uniform bucket-level access enabled".to_string(),
+                        description: "GCS bucket does not have uniform bucket-level access enabled"
+                            .to_string(),
                         provider: CloudProvider::GCP,
                     });
                     total_score -= 15.0;
-                    
+
                     recommendations.push(SecurityRecommendation {
                         id: format!("GCS-UBLA-{}", bucket.name),
                         title: "Enable uniform bucket-level access".to_string(),
-                        description: format!("Enable uniform bucket-level access for bucket {}", bucket.name),
+                        description: format!(
+                            "Enable uniform bucket-level access for bucket {}",
+                            bucket.name
+                        ),
                         priority: RecommendationPriority::High,
                         impact: "Improves security by using IAM for access control".to_string(),
                         steps: vec![
@@ -1570,21 +1667,22 @@ impl GcpClient {
                         ],
                     });
                 }
-                
+
                 // Check encryption
                 if bucket.encryption.is_none() {
                     violations.push(SecurityViolation {
                         resource_id: bucket.name.clone(),
                         rule_id: "GCS-002".to_string(),
                         severity: ViolationSeverity::Medium,
-                        description: "GCS bucket does not use customer-managed encryption".to_string(),
+                        description: "GCS bucket does not use customer-managed encryption"
+                            .to_string(),
                         provider: CloudProvider::GCP,
                     });
                     total_score -= 10.0;
                 }
             }
         }
-        
+
         Ok(SecurityAssessment {
             overall_score: total_score.max(0.0),
             provider_scores: HashMap::from([(CloudProvider::GCP, total_score.max(0.0))]),
@@ -1592,14 +1690,14 @@ impl GcpClient {
             recommendations,
         })
     }
-    
+
     /// Generate cost optimization recommendations
     pub async fn cost_optimization(&self) -> Result<CostOptimization> {
         let mut recommendations = Vec::new();
         let rightsizing = Vec::new();
         let mut reserved_instances = Vec::new();
         let mut total_savings = 0.0;
-        
+
         // Analyze Compute Engine instances
         if let Ok(instances) = self.list_compute_instances().await {
             for instance in instances {
@@ -1607,18 +1705,20 @@ impl GcpClient {
                     // Suggest preemptible instances for non-critical workloads
                     if !instance.is_spot {
                         let estimated_savings = 100.0; // Placeholder
-                        
+
                         recommendations.push(CostRecommendation {
                             resource_id: instance.name.clone(),
                             recommendation_type: "Use preemptible instances".to_string(),
                             potential_savings: estimated_savings,
-                            description: "Consider using preemptible instances for fault-tolerant workloads".to_string(),
+                            description:
+                                "Consider using preemptible instances for fault-tolerant workloads"
+                                    .to_string(),
                             complexity: ComplexityLevel::Medium,
                         });
-                        
+
                         total_savings += estimated_savings;
                     }
-                    
+
                     // Suggest committed use discounts
                     reserved_instances.push(ReservedInstanceRecommendation {
                         instance_type: instance.machine_type.clone(),
@@ -1630,7 +1730,7 @@ impl GcpClient {
                 }
             }
         }
-        
+
         // General recommendations
         recommendations.push(CostRecommendation {
             resource_id: "general".to_string(),
@@ -1639,7 +1739,7 @@ impl GcpClient {
             description: "Export billing data to BigQuery for detailed cost analysis".to_string(),
             complexity: ComplexityLevel::Low,
         });
-        
+
         recommendations.push(CostRecommendation {
             resource_id: "general".to_string(),
             recommendation_type: "Set up budget alerts".to_string(),
@@ -1647,7 +1747,7 @@ impl GcpClient {
             description: "Create budget alerts to monitor spending".to_string(),
             complexity: ComplexityLevel::Low,
         });
-        
+
         Ok(CostOptimization {
             total_potential_savings: total_savings,
             recommendations,
@@ -1655,27 +1755,27 @@ impl GcpClient {
             reserved_instance_recommendations: reserved_instances,
         })
     }
-    
+
     /// Get current project
     pub fn get_current_project(&self) -> &str {
         &self.current_project
     }
-    
+
     /// Set current project
     pub fn set_project(&mut self, project_id: String) {
         self.current_project = project_id;
     }
-    
+
     /// Get configuration
     pub fn get_config(&self) -> &GcpConfig {
         &self.config
     }
-    
+
     /// Get lifecycle manager
     pub fn get_lifecycle(&self) -> &Arc<LifecycleManager> {
         &self.lifecycle
     }
-    
+
     /// Get security module
     pub fn get_security(&self) -> &SecurityModule {
         &self.security

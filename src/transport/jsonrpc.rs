@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use uuid::Uuid;
 use std::fmt;
+use uuid::Uuid;
 
 use crate::error::{Error, Result};
 use crate::Transport;
@@ -89,7 +89,7 @@ impl JsonRpcMessage {
             params,
         })
     }
-    
+
     /// Create a new response message
     pub fn response(id: &str, result: Value) -> Self {
         JsonRpcMessage::Response(JsonRpcResponse {
@@ -99,7 +99,7 @@ impl JsonRpcMessage {
             error: None,
         })
     }
-    
+
     /// Create a new error response message
     pub fn error(id: &str, code: i64, message: &str) -> Self {
         JsonRpcMessage::Response(JsonRpcResponse {
@@ -113,7 +113,7 @@ impl JsonRpcMessage {
             }),
         })
     }
-    
+
     /// Create a new notification message
     pub fn notification(method: &str, params: Option<Value>) -> Self {
         JsonRpcMessage::Notification(JsonRpcNotification {
@@ -122,12 +122,12 @@ impl JsonRpcMessage {
             params,
         })
     }
-    
+
     /// Create a new batch message
     pub fn batch(messages: Vec<JsonRpcMessage>) -> Self {
         JsonRpcMessage::Batch(messages)
     }
-    
+
     /// Get the ID of the message (if it has one)
     pub fn id(&self) -> Option<String> {
         match self {
@@ -136,7 +136,7 @@ impl JsonRpcMessage {
             _ => None,
         }
     }
-    
+
     /// Get the method of the message (if it has one)
     pub fn method(&self) -> Option<String> {
         match self {
@@ -145,7 +145,7 @@ impl JsonRpcMessage {
             _ => None,
         }
     }
-    
+
     /// Get the parameters of the message (if it has them)
     pub fn params(&self) -> Option<Value> {
         match self {
@@ -154,7 +154,7 @@ impl JsonRpcMessage {
             _ => None,
         }
     }
-    
+
     /// Get the result of the message (if it has one)
     pub fn result(&self) -> Option<Value> {
         match self {
@@ -162,7 +162,7 @@ impl JsonRpcMessage {
             _ => None,
         }
     }
-    
+
     /// Get the error of the message (if it has one)
     pub fn get_error(&self) -> Option<JsonRpcError> {
         match self {
@@ -170,7 +170,7 @@ impl JsonRpcMessage {
             _ => None,
         }
     }
-    
+
     /// Convert to a Message
     pub fn to_message(&self) -> Message {
         match self {
@@ -194,46 +194,59 @@ impl JsonRpcMessage {
             }
         }
     }
-    
+
     /// Convert from a Message
     pub fn from_message(message: &Message) -> Result<Self> {
         match message {
             Message::Request { id, method, params } => {
                 Ok(JsonRpcMessage::Request(JsonRpcRequest {
                     jsonrpc: "2.0".to_string(),
-                    id: id.as_ref().and_then(|i| i.as_str().map(|s| s.to_string()))
+                    id: id
+                        .as_ref()
+                        .and_then(|i| i.as_str().map(|s| s.to_string()))
                         .unwrap_or_else(|| Uuid::new_v4().to_string()),
                     method: method.clone(),
                     params: params.clone(),
                 }))
-            },
+            }
             Message::Response { id, result, error } => {
                 Ok(JsonRpcMessage::Response(JsonRpcResponse {
                     jsonrpc: "2.0".to_string(),
-                    id: id.as_ref().and_then(|i| i.as_str().map(|s| s.to_string()))
+                    id: id
+                        .as_ref()
+                        .and_then(|i| i.as_str().map(|s| s.to_string()))
                         .unwrap_or_else(|| Uuid::new_v4().to_string()),
                     result: result.clone(),
                     error: error.as_ref().map(|e| {
                         let code = e.get("code").and_then(|c| c.as_i64()).unwrap_or(-32000);
-                        let message = e.get("message").and_then(|m| m.as_str()).unwrap_or("Unknown error").to_string();
+                        let message = e
+                            .get("message")
+                            .and_then(|m| m.as_str())
+                            .unwrap_or("Unknown error")
+                            .to_string();
                         let data = e.get("data").cloned();
-                        
-                        JsonRpcError { code, message, data }
+
+                        JsonRpcError {
+                            code,
+                            message,
+                            data,
+                        }
                     }),
                 }))
-            },
+            }
             Message::Notification { method, params } => {
                 Ok(JsonRpcMessage::Notification(JsonRpcNotification {
                     jsonrpc: "2.0".to_string(),
                     method: method.clone(),
                     params: params.clone(),
                 }))
-            },
+            }
             Message::Batch(messages) => {
-                let batch_messages = messages.iter()
+                let batch_messages = messages
+                    .iter()
                     .map(JsonRpcMessage::from_message)
                     .collect::<Result<Vec<_>>>()?;
-                    
+
                 Ok(JsonRpcMessage::Batch(batch_messages))
             }
         }
@@ -281,15 +294,32 @@ impl Message {
     /// Get the error from the message
     pub fn get_error(&self) -> Option<JsonRpcError> {
         match self {
-            Message::Request { id: _, method: _, params: _ } => None,
-            Message::Response { id: _, result: _, error } => error.as_ref().and_then(|e| {
-                e.get("code").and_then(|c| c.as_i64()).map(|code| JsonRpcError {
-                    code,
-                    message: e.get("message").and_then(|m| m.as_str()).unwrap_or("Unknown error").to_string(),
-                    data: e.get("data").cloned(),
-                })
+            Message::Request {
+                id: _,
+                method: _,
+                params: _,
+            } => None,
+            Message::Response {
+                id: _,
+                result: _,
+                error,
+            } => error.as_ref().and_then(|e| {
+                e.get("code")
+                    .and_then(|c| c.as_i64())
+                    .map(|code| JsonRpcError {
+                        code,
+                        message: e
+                            .get("message")
+                            .and_then(|m| m.as_str())
+                            .unwrap_or("Unknown error")
+                            .to_string(),
+                        data: e.get("data").cloned(),
+                    })
             }),
-            Message::Notification { method: _, params: _ } => None,
+            Message::Notification {
+                method: _,
+                params: _,
+            } => None,
             Message::Batch(messages) => messages.iter().find_map(|m| m.get_error()),
         }
     }
@@ -333,15 +363,21 @@ pub fn create_error_response(id: &str, code: i64, message: &str) -> Message {
     }
 }
 
-/// Implementation of From<Message> for Value
+/// Implementation of `From<Message>` for Value
 impl From<Message> for Value {
     fn from(message: Message) -> Self {
-        serde_json::to_value(message).unwrap_or_else(|_| Value::Null)
+        serde_json::to_value(message).unwrap_or(Value::Null)
     }
 }
 
 /// Perform a request using a transport
-pub async fn perform_request<T: Transport>(transport: &mut T, method: &str, params: Option<Value>) -> Result<Value> {
-    transport.request(method, params).await
+pub async fn perform_request<T: Transport>(
+    transport: &mut T,
+    method: &str,
+    params: Option<Value>,
+) -> Result<Value> {
+    transport
+        .request(method, params)
+        .await
         .map_err(|e| Error::Transport(crate::error::TransportError::from(e)))
 }

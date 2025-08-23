@@ -1,9 +1,9 @@
 use crate::error::{Error, Result};
 use crate::lifecycle::LifecycleManager;
+use chrono::{DateTime, Duration, Utc};
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use chrono::{DateTime, Utc, Duration};
-use reqwest::Client;
 
 /// Trading account information
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -273,7 +273,11 @@ impl<'a> AlpacaClient<'a> {
     }
 
     /// Set API key and secret
-    pub fn with_credentials(mut self, api_key: impl Into<String>, api_secret: impl Into<String>) -> Self {
+    pub fn with_credentials(
+        mut self,
+        api_key: impl Into<String>,
+        api_secret: impl Into<String>,
+    ) -> Self {
         self.api_key = api_key.into();
         self.api_secret = api_secret.into();
         self
@@ -300,175 +304,206 @@ impl<'a> AlpacaClient<'a> {
     /// Get account information
     pub async fn get_account(&self) -> Result<Account> {
         self.check_credentials()?;
-        
+
         let url = format!("{}/v2/account", self.base_url);
-        let response = self.client
+        let response = self
+            .client
             .get(&url)
             .header("APCA-API-KEY-ID", &self.api_key)
             .header("APCA-API-SECRET-KEY", &self.api_secret)
             .send()
             .await
             .map_err(|e| Error::network(format!("Failed to get account information: {}", e)))?;
-            
+
         if !response.status().is_success() {
             let status = response.status();
-            let text = response.text().await
+            let text = response
+                .text()
+                .await
                 .unwrap_or_else(|_| "Unable to read error response".into());
-            return Err(Error::network(format!("Alpaca API returned error {}: {}", status, text)));
+            return Err(Error::network(format!(
+                "Alpaca API returned error {}: {}",
+                status, text
+            )));
         }
-        
-        let account: Account = response.json()
+
+        let account: Account = response
+            .json()
             .await
             .map_err(|e| Error::network(format!("Failed to parse account response: {}", e)))?;
-            
+
         Ok(account)
     }
-    
+
     /// Get positions
     pub async fn get_positions(&self) -> Result<Vec<Position>> {
         self.check_credentials()?;
-        
+
         let url = format!("{}/v2/positions", self.base_url);
-        let response = self.client
+        let response = self
+            .client
             .get(&url)
             .header("APCA-API-KEY-ID", &self.api_key)
             .header("APCA-API-SECRET-KEY", &self.api_secret)
             .send()
             .await
             .map_err(|e| Error::network(format!("Failed to get positions: {}", e)))?;
-            
+
         if !response.status().is_success() {
             let status = response.status();
-            let text = response.text().await
+            let text = response
+                .text()
+                .await
                 .unwrap_or_else(|_| "Unable to read error response".into());
-            return Err(Error::network(format!("Alpaca API returned error {}: {}", status, text)));
+            return Err(Error::network(format!(
+                "Alpaca API returned error {}: {}",
+                status, text
+            )));
         }
-        
-        let positions: Vec<Position> = response.json()
+
+        let positions: Vec<Position> = response
+            .json()
             .await
             .map_err(|e| Error::network(format!("Failed to parse positions response: {}", e)))?;
-            
+
         Ok(positions)
     }
-    
+
     /// Get latest quote for a stock
     pub async fn get_stock_quote(&self, symbol: &str) -> Result<Quote> {
         self.check_credentials()?;
-        
+
         let url = format!("{}/v2/stocks/{}/quotes/latest", self.data_base_url, symbol);
-        let response = self.client
+        let response = self
+            .client
             .get(&url)
             .header("APCA-API-KEY-ID", &self.api_key)
             .header("APCA-API-SECRET-KEY", &self.api_secret)
             .send()
             .await
             .map_err(|e| Error::network(format!("Failed to get stock quote: {}", e)))?;
-            
+
         if !response.status().is_success() {
             let status = response.status();
-            let text = response.text().await
+            let text = response
+                .text()
+                .await
                 .unwrap_or_else(|_| "Unable to read error response".into());
-            return Err(Error::network(format!("Alpaca API returned error {}: {}", status, text)));
+            return Err(Error::network(format!(
+                "Alpaca API returned error {}: {}",
+                status, text
+            )));
         }
-        
+
         #[derive(Deserialize)]
         struct QuoteResponse {
             quote: Quote,
         }
-        
-        let response_data: QuoteResponse = response.json()
+
+        let response_data: QuoteResponse = response
+            .json()
             .await
             .map_err(|e| Error::network(format!("Failed to parse quote response: {}", e)))?;
-            
+
         Ok(response_data.quote)
     }
-    
+
     /// Get historical bars for a stock
     pub async fn get_stock_bars(&self, symbol: &str, days: i64) -> Result<Vec<Bar>> {
         self.check_credentials()?;
-        
+
         let start_time = Utc::now() - Duration::days(days);
         let start_str = start_time.format("%Y-%m-%dT%H:%M:%SZ").to_string();
-        
+
         let url = format!(
-            "{}/v2/stocks/{}/bars?timeframe=1D&start={}&adjustment=raw", 
-            self.data_base_url, 
-            symbol,
-            start_str
+            "{}/v2/stocks/{}/bars?timeframe=1D&start={}&adjustment=raw",
+            self.data_base_url, symbol, start_str
         );
-        
-        let response = self.client
+
+        let response = self
+            .client
             .get(&url)
             .header("APCA-API-KEY-ID", &self.api_key)
             .header("APCA-API-SECRET-KEY", &self.api_secret)
             .send()
             .await
             .map_err(|e| Error::network(format!("Failed to get stock bars: {}", e)))?;
-            
+
         if !response.status().is_success() {
             let status = response.status();
-            let text = response.text().await
+            let text = response
+                .text()
+                .await
                 .unwrap_or_else(|_| "Unable to read error response".into());
-            return Err(Error::network(format!("Alpaca API returned error {}: {}", status, text)));
+            return Err(Error::network(format!(
+                "Alpaca API returned error {}: {}",
+                status, text
+            )));
         }
-        
+
         #[derive(Deserialize)]
         struct BarResponse {
             bars: Vec<Bar>,
         }
-        
-        let response_data: BarResponse = response.json()
+
+        let response_data: BarResponse = response
+            .json()
             .await
             .map_err(|e| Error::network(format!("Failed to parse bars response: {}", e)))?;
-            
+
         Ok(response_data.bars)
     }
-    
+
     /// Get orders
     pub async fn get_orders(&self, status: OrderQueryType, limit: usize) -> Result<Vec<Order>> {
         self.check_credentials()?;
-        
+
         let status_str = match status {
             OrderQueryType::Open => "open",
             OrderQueryType::Closed => "closed",
             OrderQueryType::All => "all",
         };
-        
+
         let url = format!(
-            "{}/v2/orders?status={}&limit={}", 
-            self.base_url, 
-            status_str,
-            limit
+            "{}/v2/orders?status={}&limit={}",
+            self.base_url, status_str, limit
         );
-        
-        let response = self.client
+
+        let response = self
+            .client
             .get(&url)
             .header("APCA-API-KEY-ID", &self.api_key)
             .header("APCA-API-SECRET-KEY", &self.api_secret)
             .send()
             .await
             .map_err(|e| Error::network(format!("Failed to get orders: {}", e)))?;
-            
+
         if !response.status().is_success() {
             let status = response.status();
-            let text = response.text().await
+            let text = response
+                .text()
+                .await
                 .unwrap_or_else(|_| "Unable to read error response".into());
-            return Err(Error::network(format!("Alpaca API returned error {}: {}", status, text)));
+            return Err(Error::network(format!(
+                "Alpaca API returned error {}: {}",
+                status, text
+            )));
         }
-        
-        let orders: Vec<Order> = response.json()
+
+        let orders: Vec<Order> = response
+            .json()
             .await
             .map_err(|e| Error::network(format!("Failed to parse orders response: {}", e)))?;
-            
+
         Ok(orders)
     }
-    
+
     /// Place a market order
     pub async fn place_market_order(&self, request: MarketOrderRequest) -> Result<Order> {
         self.check_credentials()?;
-        
+
         let url = format!("{}/v2/orders", self.base_url);
-        
+
         #[derive(Serialize)]
         struct OrderRequest {
             symbol: String,
@@ -477,7 +512,7 @@ impl<'a> AlpacaClient<'a> {
             type_: OrderType,
             time_in_force: TimeInForce,
         }
-        
+
         let order_request = OrderRequest {
             symbol: request.symbol,
             qty: request.qty.to_string(),
@@ -485,8 +520,9 @@ impl<'a> AlpacaClient<'a> {
             type_: OrderType::Market,
             time_in_force: request.time_in_force,
         };
-        
-        let response = self.client
+
+        let response = self
+            .client
             .post(&url)
             .header("APCA-API-KEY-ID", &self.api_key)
             .header("APCA-API-SECRET-KEY", &self.api_secret)
@@ -500,28 +536,35 @@ impl<'a> AlpacaClient<'a> {
             .send()
             .await
             .map_err(|e| Error::network(format!("Failed to place market order: {}", e)))?;
-            
+
         if !response.status().is_success() {
             let status = response.status();
-            let text = response.text().await
+            let text = response
+                .text()
+                .await
                 .unwrap_or_else(|_| "Unable to read error response".into());
-            return Err(Error::network(format!("Alpaca API returned error {}: {}", status, text)));
+            return Err(Error::network(format!(
+                "Alpaca API returned error {}: {}",
+                status, text
+            )));
         }
-        
-        let order: Order = response.json()
+
+        let order: Order = response
+            .json()
             .await
             .map_err(|e| Error::network(format!("Failed to parse order response: {}", e)))?;
-            
+
         Ok(order)
     }
-    
+
     /// Place a limit order
     pub async fn place_limit_order(&self, request: LimitOrderRequest) -> Result<Order> {
         self.check_credentials()?;
-        
+
         let url = format!("{}/v2/orders", self.base_url);
-        
-        let response = self.client
+
+        let response = self
+            .client
             .post(&url)
             .header("APCA-API-KEY-ID", &self.api_key)
             .header("APCA-API-SECRET-KEY", &self.api_secret)
@@ -536,42 +579,54 @@ impl<'a> AlpacaClient<'a> {
             .send()
             .await
             .map_err(|e| Error::network(format!("Failed to place limit order: {}", e)))?;
-            
+
         if !response.status().is_success() {
             let status = response.status();
-            let text = response.text().await
+            let text = response
+                .text()
+                .await
                 .unwrap_or_else(|_| "Unable to read error response".into());
-            return Err(Error::network(format!("Alpaca API returned error {}: {}", status, text)));
+            return Err(Error::network(format!(
+                "Alpaca API returned error {}: {}",
+                status, text
+            )));
         }
-        
-        let order: Order = response.json()
+
+        let order: Order = response
+            .json()
             .await
             .map_err(|e| Error::network(format!("Failed to parse order response: {}", e)))?;
-            
+
         Ok(order)
     }
-    
+
     /// Cancel an order
     pub async fn cancel_order(&self, order_id: &str) -> Result<()> {
         self.check_credentials()?;
-        
+
         let url = format!("{}/v2/orders/{}", self.base_url, order_id);
-        
-        let response = self.client
+
+        let response = self
+            .client
             .delete(&url)
             .header("APCA-API-KEY-ID", &self.api_key)
             .header("APCA-API-SECRET-KEY", &self.api_secret)
             .send()
             .await
             .map_err(|e| Error::network(format!("Failed to cancel order: {}", e)))?;
-            
+
         if !response.status().is_success() {
             let status = response.status();
-            let text = response.text().await
+            let text = response
+                .text()
+                .await
                 .unwrap_or_else(|_| "Unable to read error response".into());
-            return Err(Error::network(format!("Alpaca API returned error {}: {}", status, text)));
+            return Err(Error::network(format!(
+                "Alpaca API returned error {}: {}",
+                status, text
+            )));
         }
-        
+
         Ok(())
     }
 
@@ -710,4 +765,4 @@ impl<'a> AlpacaClient<'a> {
             ),
         ]
     }
-} 
+}

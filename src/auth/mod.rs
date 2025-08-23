@@ -1,8 +1,8 @@
 use crate::error::{Error, Result};
-use crate::security::{SecurityModule, SanitizationOptions, ValidationResult};
-use oauth2::{CsrfToken};
-use url::Url;
+use crate::security::{SanitizationOptions, SecurityModule, ValidationResult};
+use oauth2::CsrfToken;
 use std::time::{Duration, SystemTime};
+use url::Url;
 
 pub mod oauth;
 
@@ -120,7 +120,7 @@ impl AuthManager {
     pub fn new(config: AuthConfig) -> Result<Self> {
         // Validate configuration
         config.validate()?;
-        
+
         Ok(Self {
             oauth_client: None,
             credentials: None,
@@ -132,17 +132,18 @@ impl AuthManager {
             csrf_tokens: std::collections::HashMap::new(),
         })
     }
-    
+
     /// Initialize OAuth client if OAuth is configured
     pub fn init_oauth(&mut self, auth_base_url: String) -> Result<()> {
         // Validate the auth URL
         self.security.validate_url(&auth_base_url)?;
-        
+
         self.oauth_client = Some(oauth::OAuth21Client::new(&auth_base_url));
-        self.security.log_security_event("OAUTH_INIT", Some(&auth_base_url));
+        self.security
+            .log_security_event("OAUTH_INIT", Some(&auth_base_url));
         Ok(())
     }
-    
+
     /// Initialize with API key (secure)
     pub fn with_api_key(api_key: &str) -> Result<Self> {
         // Validate API key format
@@ -151,15 +152,15 @@ impl AuthManager {
             max_length: Some(512),
             ..Default::default()
         };
-        
+
         match security.validate_input(api_key, &validation_opts) {
-            ValidationResult::Valid => {},
+            ValidationResult::Valid => {}
             ValidationResult::Invalid(reason) | ValidationResult::Malicious(reason) => {
                 security.log_security_event("INVALID_API_KEY", Some(&reason));
                 return Err(Error::auth("Invalid API key format"));
             }
         }
-        
+
         let mut auth_manager = Self::new(AuthConfig::new(
             AuthProviderType::ApiKey,
             "".to_string(),
@@ -169,57 +170,68 @@ impl AuthManager {
             "".to_string(),
             vec![],
         )?)?;
-        
+
         auth_manager.provider_type = AuthProviderType::ApiKey;
         auth_manager.api_key = Some(api_key.to_string());
-        auth_manager.security.log_security_event("API_KEY_AUTH_INIT", None);
-        
+        auth_manager
+            .security
+            .log_security_event("API_KEY_AUTH_INIT", None);
+
         Ok(auth_manager)
     }
-    
+
     /// Get OAuth authorization URL with CSRF protection
     pub async fn get_oauth_auth_url(&mut self) -> Result<(Url, CsrfToken)> {
         // Check rate limiting
         self.security.check_auth_rate_limit()?;
-        
+
         if let Some(client) = &mut self.oauth_client {
             let csrf_token = CsrfToken::new_random();
             let url_string = client.start_authorization_flow(
                 &self.config.redirect_url,
                 self.config.scopes.clone(),
-                None // No resource indicators for basic flow
+                None, // No resource indicators for basic flow
             )?;
-            
+
             // Validate the returned URL
-            self.security.validate_url(&url_string)
-                .map_err(|e| Error::auth(format!("Invalid URL returned from OAuth client: {}", e)))?;
-            
+            self.security.validate_url(&url_string).map_err(|e| {
+                Error::auth(format!("Invalid URL returned from OAuth client: {}", e))
+            })?;
+
             // Parse the validated URL
             let url = url::Url::parse(&url_string)
                 .map_err(|e| Error::auth(format!("Failed to parse URL: {}", e)))?;
-            
+
             // Store CSRF token with expiration (10 minutes)
             let csrf_key = csrf_token.secret().clone();
             self.csrf_tokens.insert(
                 csrf_key.clone(),
-                (csrf_token.clone(), SystemTime::now() + Duration::from_secs(600))
+                (
+                    csrf_token.clone(),
+                    SystemTime::now() + Duration::from_secs(600),
+                ),
             );
-            
-            self.security.log_security_event("OAUTH_AUTH_URL_GENERATED", None);
+
+            self.security
+                .log_security_event("OAUTH_AUTH_URL_GENERATED", None);
             Ok((url, csrf_token))
         } else {
             Err(Error::auth("OAuth client not initialized"))
         }
     }
-    
+
     /// Exchange OAuth code for credentials with CSRF validation
-    pub async fn exchange_oauth_code(&mut self, code: &str, csrf_token: &str) -> Result<Credentials> {
+    pub async fn exchange_oauth_code(
+        &mut self,
+        code: &str,
+        csrf_token: &str,
+    ) -> Result<Credentials> {
         // Check rate limiting
         self.security.check_auth_rate_limit()?;
-        
+
         // Validate CSRF token
         self.validate_csrf_token(csrf_token)?;
-        
+
         // Validate authorization code
         let validation_opts = SanitizationOptions {
             max_length: Some(512),
@@ -227,18 +239,19 @@ impl AuthManager {
             allow_sql: false,
             allow_shell_meta: false,
         };
-        
+
         match self.security.validate_input(code, &validation_opts) {
-            ValidationResult::Valid => {},
+            ValidationResult::Valid => {}
             ValidationResult::Invalid(reason) | ValidationResult::Malicious(reason) => {
-                self.security.log_security_event("MALICIOUS_AUTH_CODE", Some(&reason));
+                self.security
+                    .log_security_event("MALICIOUS_AUTH_CODE", Some(&reason));
                 return Err(Error::auth("Invalid authorization code format"));
             }
         }
-        
+
         if let Some(client) = &mut self.oauth_client {
             let token = client.exchange_code(code.to_string(), None).await?;
-            
+
             let credentials = Credentials {
                 token: token.access_token.clone(),
                 token_type: token.token_type.clone(),
@@ -247,42 +260,44 @@ impl AuthManager {
                 scope: token.scope.clone(),
                 created_at: SystemTime::now(),
             };
-            
+
             // Store credentials securely
             self.credentials = Some(credentials.clone());
-            
+
             // Clean up used CSRF token
             self.csrf_tokens.remove(csrf_token);
-            
-            self.security.log_security_event("OAUTH_TOKEN_EXCHANGE_SUCCESS", None);
+
+            self.security
+                .log_security_event("OAUTH_TOKEN_EXCHANGE_SUCCESS", None);
             Ok(credentials)
         } else {
             Err(Error::auth("OAuth client not initialized"))
         }
     }
-    
+
     /// Validate CSRF token and check expiration
     fn validate_csrf_token(&mut self, csrf_token: &str) -> Result<()> {
         // Clean up expired tokens first
         let now = SystemTime::now();
         self.csrf_tokens.retain(|_, (_, expiry)| *expiry > now);
-        
+
         // Validate token using constant-time comparison
         for (stored_token, (_, expiry)) in &self.csrf_tokens {
             if self.security.secure_compare(csrf_token, stored_token) && *expiry > now {
                 return Ok(());
             }
         }
-        
-        self.security.log_security_event("CSRF_TOKEN_VALIDATION_FAILED", Some(csrf_token));
+
+        self.security
+            .log_security_event("CSRF_TOKEN_VALIDATION_FAILED", Some(csrf_token));
         Err(Error::auth("Invalid or expired CSRF token"))
     }
-    
+
     /// Refresh expired credentials
     pub async fn refresh_credentials(&mut self) -> Result<Credentials> {
         // Check rate limiting
         self.security.check_auth_rate_limit()?;
-        
+
         if let Some(client) = &mut self.oauth_client {
             // Check if we have current credentials with refresh token
             if let Some(ref creds) = self.credentials {
@@ -295,10 +310,10 @@ impl AuthManager {
                             return Ok(creds.clone());
                         }
                     }
-                    
+
                     // Use refresh token to get a new token
                     let token = client.refresh_token().await?;
-                    
+
                     let credentials = Credentials {
                         token: token.access_token.clone(),
                         token_type: token.token_type.clone(),
@@ -307,21 +322,22 @@ impl AuthManager {
                         scope: token.scope.clone(),
                         created_at: SystemTime::now(),
                     };
-                    
+
                     // Store credentials securely
                     self.credentials = Some(credentials.clone());
-                    
-                    self.security.log_security_event("TOKEN_REFRESH_SUCCESS", None);
+
+                    self.security
+                        .log_security_event("TOKEN_REFRESH_SUCCESS", None);
                     return Ok(credentials);
                 }
             }
-            
+
             Err(Error::auth("No refresh token available"))
         } else {
             Err(Error::auth("OAuth client not initialized"))
         }
     }
-    
+
     /// Set credentials directly with validation
     pub async fn set_credentials(&mut self, credentials: Credentials) -> Result<()> {
         // Validate token format
@@ -330,25 +346,26 @@ impl AuthManager {
             max_length: Some(2048),
             ..Default::default()
         };
-        
+
         match self.security.validate_input(&token_str, &validation_opts) {
-            ValidationResult::Valid => {},
+            ValidationResult::Valid => {}
             ValidationResult::Invalid(reason) | ValidationResult::Malicious(reason) => {
-                self.security.log_security_event("INVALID_TOKEN_FORMAT", Some(&reason));
+                self.security
+                    .log_security_event("INVALID_TOKEN_FORMAT", Some(&reason));
                 return Err(Error::auth("Invalid token format"));
             }
         }
-        
+
         self.credentials = Some(credentials);
         self.security.log_security_event("CREDENTIALS_SET", None);
         Ok(())
     }
-    
+
     /// Get current credentials (returns cloned credentials to avoid exposing internal state)
     pub async fn get_credentials(&self) -> Option<Credentials> {
         self.credentials.clone()
     }
-    
+
     /// Get authorization header with validation
     pub async fn get_auth_header(&self) -> Result<String> {
         if let Some(credentials) = &self.credentials {
@@ -356,11 +373,12 @@ impl AuthManager {
             if let Some(expires_in) = credentials.expires_in {
                 let expires_at = credentials.created_at + Duration::from_secs(expires_in);
                 if SystemTime::now() >= expires_at {
-                    self.security.log_security_event("EXPIRED_TOKEN_USAGE_ATTEMPT", None);
+                    self.security
+                        .log_security_event("EXPIRED_TOKEN_USAGE_ATTEMPT", None);
                     return Err(Error::auth("Token has expired"));
                 }
             }
-            
+
             Ok(format!("{} {}", credentials.token_type, credentials.token))
         } else if let Some(client) = &self.oauth_client {
             // Try to get a token from OAuth client
@@ -375,23 +393,24 @@ impl AuthManager {
             Err(Error::auth("No credentials available"))
         }
     }
-    
+
     /// Clear credentials securely
     pub async fn clear_credentials(&mut self) {
         if self.credentials.is_some() {
-            self.security.log_security_event("CREDENTIALS_CLEARED", None);
+            self.security
+                .log_security_event("CREDENTIALS_CLEARED", None);
         }
         self.credentials = None;
         self.api_key = None;
         self.jwt_token = None;
         self.csrf_tokens.clear();
     }
-    
+
     /// Get the auth provider type
     pub fn get_provider_type(&self) -> AuthProviderType {
         self.provider_type.clone()
     }
-    
+
     /// Check if credentials are valid and not expired
     pub fn is_authenticated(&self) -> bool {
         if let Some(credentials) = &self.credentials {
@@ -426,10 +445,10 @@ pub type AuthResult<T> = Result<AuthResultData<T>>;
 pub trait AuthProvider: Send + Sync {
     /// Authenticate the user
     async fn authenticate(&self) -> Result<AuthResultData<Credentials>>;
-    
+
     /// Handle authorization code
     async fn handle_authorization_code(&self, code: &str) -> Result<AuthResultData<Credentials>>;
-    
+
     /// Get authorization header
     async fn get_auth_header(&self) -> Result<String>;
 
@@ -467,40 +486,43 @@ impl AuthConfig {
             redirect_url,
             scopes,
         };
-        
+
         config.validate()?;
         Ok(config)
     }
-    
+
     /// Validate configuration
     pub fn validate(&self) -> Result<()> {
         let security = SecurityModule::new();
-        
+
         // Validate URLs
-        security.validate_url(&self.auth_url)
+        security
+            .validate_url(&self.auth_url)
             .map_err(|e| Error::config(format!("Invalid auth URL: {}", e)))?;
-        security.validate_url(&self.token_url)
+        security
+            .validate_url(&self.token_url)
             .map_err(|e| Error::config(format!("Invalid token URL: {}", e)))?;
-        security.validate_url(&self.redirect_url)
+        security
+            .validate_url(&self.redirect_url)
             .map_err(|e| Error::config(format!("Invalid redirect URL: {}", e)))?;
-        
+
         // Validate client ID
         if self.client_id.is_empty() {
             return Err(Error::config("Client ID cannot be empty"));
         }
-        
+
         let validation_opts = SanitizationOptions {
             max_length: Some(256),
             ..Default::default()
         };
-        
+
         match security.validate_input(&self.client_id, &validation_opts) {
-            ValidationResult::Valid => {},
+            ValidationResult::Valid => {}
             ValidationResult::Invalid(reason) | ValidationResult::Malicious(reason) => {
                 return Err(Error::config(format!("Invalid client ID: {}", reason)));
             }
         }
-        
+
         Ok(())
     }
 }
@@ -509,56 +531,65 @@ impl AuthConfig {
 pub async fn authorize(config: AuthConfig) -> AuthResult<(String, String)> {
     // Validate configuration
     config.validate().map_err(|e| Error::auth(e.to_string()))?;
-    
+
     // Create OAuth client for testing
     let _client = oauth::OAuth21Client::new("http://localhost:8080");
     let security = SecurityModule::new();
     security.log_security_event("OAUTH_AUTHORIZE_ATTEMPT", None);
-    
+
     // Return placeholder values for the authorization URL and state
-    Ok(AuthResultData::Authenticated(("https://auth.example.com/oauth".to_string(), "csrf_token_123".to_string())))
+    Ok(AuthResultData::Authenticated((
+        "https://auth.example.com/oauth".to_string(),
+        "csrf_token_123".to_string(),
+    )))
 }
 
 pub async fn exchange_code(config: AuthConfig, code: &str) -> AuthResult<oauth::OAuthToken> {
     // Validate configuration and code
     config.validate().map_err(|e| Error::auth(e.to_string()))?;
-    
+
     let security = SecurityModule::new();
     let validation_opts = SanitizationOptions::default();
-    
+
     match security.validate_input(code, &validation_opts) {
-        ValidationResult::Valid => {},
+        ValidationResult::Valid => {}
         ValidationResult::Invalid(reason) | ValidationResult::Malicious(reason) => {
             security.log_security_event("MALICIOUS_CODE_EXCHANGE", Some(&reason));
-            return Err(Error::auth(format!("Invalid authorization code: {}", reason)));
+            return Err(Error::auth(format!(
+                "Invalid authorization code: {}",
+                reason
+            )));
         }
     }
-    
+
     let mut client = oauth::OAuth21Client::new("http://localhost:8080");
     let token = client.exchange_code(code.to_string(), None).await?;
-    
+
     security.log_security_event("CODE_EXCHANGE_SUCCESS", None);
     Ok(AuthResultData::Authenticated(token))
 }
 
-pub async fn refresh_token(_config: AuthConfig, _refresh_token: &str) -> AuthResult<oauth::OAuthToken> {
+pub async fn refresh_token(
+    _config: AuthConfig,
+    _refresh_token: &str,
+) -> AuthResult<oauth::OAuthToken> {
     let mut client = oauth::OAuth21Client::new("http://localhost:8080");
     // Note: In the corrected API, the refresh token is set during initial token exchange
     // and the refresh_token() method doesn't take parameters
     let token = client.refresh_token().await?;
     Ok(AuthResultData::Authenticated(token))
-} 
+}
 
 pub fn test_auth() {
     // Test authentication flow with OAuth 2.1
     let _client = oauth::OAuth21Client::new("http://localhost:8080");
-    
+
     println!("OAuth client created: {:?}", _client);
-    
+
     // In a real implementation:
     // 1. Start authorization flow
     // 2. Get authorization URL
     // 3. User visits URL and authorizes
     // 4. Exchange code for token
     // 5. Use token for API calls
-} 
+}

@@ -1,2 +1,2 @@
 /// Flutter development module
-pub mod flutter; 
+pub mod flutter;

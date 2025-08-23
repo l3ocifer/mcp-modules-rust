@@ -1,12 +1,11 @@
 /// High-performance analytics module for MCP operations
-/// 
+///
 /// Provides analytics and metrics collection with efficient data processing,
 /// streaming analytics, and performance monitoring capabilities.
-
 use crate::lifecycle::LifecycleManager;
-use std::sync::Arc;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use serde::{Serialize, Deserialize};
+use std::sync::Arc;
 
 /// Analytics module with performance optimizations
 #[derive(Debug)]
@@ -127,4 +126,4 @@ pub mod superset {
         pub name: String,
         pub table_name: String,
     }
-} 
+}

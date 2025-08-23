@@ -1,14 +1,14 @@
 use std::string::ToString;
-use tokio::task::JoinError;
 use std::sync::PoisonError;
 use std::time::SystemTimeError;
+use tokio::task::JoinError;
 
 /// Comprehensive error type for the DevOps MCP library with enhanced handling
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// Authentication and authorization errors
     #[error("Authentication error: {message}")]
-    Auth { 
+    Auth {
         message: String,
         #[source]
         source: Option<Box<dyn std::error::Error + Send + Sync>>,
@@ -17,7 +17,7 @@ pub enum Error {
 
     /// Configuration-related errors  
     #[error("Configuration error: {message}")]
-    Config { 
+    Config {
         message: String,
         #[source]
         source: Option<Box<dyn std::error::Error + Send + Sync>>,
@@ -26,7 +26,7 @@ pub enum Error {
 
     /// Network and connection errors
     #[error("Network error: {message}")]
-    Network { 
+    Network {
         message: String,
         #[source]
         source: Option<Box<dyn std::error::Error + Send + Sync>>,
@@ -36,7 +36,7 @@ pub enum Error {
 
     /// Service-specific errors
     #[error("Service error: {message}")]
-    Service { 
+    Service {
         message: String,
         service_name: Option<String>,
         #[source]
@@ -50,7 +50,7 @@ pub enum Error {
 
     /// Protocol-level errors
     #[error("Protocol error: {message}")]
-    Protocol { 
+    Protocol {
         message: String,
         protocol_version: Option<String>,
         #[source]
@@ -59,7 +59,7 @@ pub enum Error {
 
     /// Data parsing and validation errors
     #[error("Parsing error: {message}")]
-    Parsing { 
+    Parsing {
         message: String,
         expected_format: Option<String>,
         actual_input: Option<String>,
@@ -69,7 +69,7 @@ pub enum Error {
 
     /// Input validation errors
     #[error("Validation error: {message}")]
-    Validation { 
+    Validation {
         message: String,
         field: Option<String>,
         constraint: Option<String>,
@@ -77,7 +77,7 @@ pub enum Error {
 
     /// Resource not found errors
     #[error("Resource not found: {message}")]
-    NotFound { 
+    NotFound {
         message: String,
         resource_type: Option<String>,
         resource_id: Option<String>,
@@ -85,7 +85,7 @@ pub enum Error {
 
     /// Internal system errors
     #[error("Internal error: {message}")]
-    Internal { 
+    Internal {
         message: String,
         operation: Option<String>,
         #[source]
@@ -94,7 +94,7 @@ pub enum Error {
 
     /// Invalid data errors
     #[error("Invalid data: {message}")]
-    InvalidData { 
+    InvalidData {
         message: String,
         data_type: Option<String>,
         #[source]
@@ -103,7 +103,7 @@ pub enum Error {
 
     /// Connection-related errors
     #[error("Connection error: {message}")]
-    Connection { 
+    Connection {
         message: String,
         endpoint: Option<String>,
         retry_count: Option<u32>,
@@ -113,7 +113,7 @@ pub enum Error {
 
     /// Timeout errors
     #[error("Operation timed out: {message}")]
-    Timeout { 
+    Timeout {
         message: String,
         operation: Option<String>,
         duration: Option<std::time::Duration>,
@@ -121,7 +121,7 @@ pub enum Error {
 
     /// Capability errors (when feature is not supported)
     #[error("Capability not supported: {message}")]
-    Capability { 
+    Capability {
         message: String,
         required_feature: Option<String>,
         alternative: Option<String>,
@@ -129,7 +129,7 @@ pub enum Error {
 
     /// API-specific errors
     #[error("API error: {message}")]
-    Api { 
+    Api {
         message: String,
         api_name: Option<String>,
         status_code: Option<u16>,
@@ -139,7 +139,7 @@ pub enum Error {
 
     /// I/O operation errors
     #[error("I/O error: {message}")]
-    Io { 
+    Io {
         message: String,
         operation: Option<String>,
         path: Option<std::path::PathBuf>,
@@ -152,48 +152,43 @@ pub enum Error {
 #[derive(Debug, thiserror::Error, Clone)]
 pub enum TransportError {
     #[error("Connection failed: {message}")]
-    ConnectionFailed { 
+    ConnectionFailed {
         message: String,
         retry_count: Option<u32>,
     },
 
     #[error("Request failed: {message}")]
-    RequestFailed { 
+    RequestFailed {
         message: String,
         method: Option<String>,
     },
 
     #[error("Protocol error: {message} (code: {code})")]
-    Protocol { 
-        message: String,
-        code: i64,
-    },
+    Protocol { message: String, code: i64 },
 
     #[error("Serialization error: {message}")]
-    Serialization { 
+    Serialization {
         message: String,
         format: Option<String>,
     },
 
     #[error("Authentication failed: {message}")]
-    AuthenticationFailed { 
+    AuthenticationFailed {
         message: String,
         auth_type: Option<String>,
     },
 
     #[error("Rate limit exceeded: {message}")]
-    RateLimitExceeded { 
+    RateLimitExceeded {
         message: String,
         retry_after: Option<std::time::Duration>,
     },
 
     #[error("Transport not supported: {transport_type}")]
-    NotSupported { 
-        transport_type: String,
-    },
+    NotSupported { transport_type: String },
 
     #[error("Request timeout: {message}")]
-    RequestTimeout { 
+    RequestTimeout {
         message: String,
         duration: Option<std::time::Duration>,
     },
@@ -203,22 +198,18 @@ pub enum TransportError {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RecoveryStrategy {
     /// Retry the operation
-    Retry { 
+    Retry {
         max_attempts: u32,
         delay: std::time::Duration,
     },
     /// Fallback to alternative method
-    Fallback { 
-        alternative: String,
-    },
+    Fallback { alternative: String },
     /// Skip and continue
     Skip,
     /// Fail immediately
     Fail,
     /// Manual intervention required
-    Manual { 
-        instructions: String,
-    },
+    Manual { instructions: String },
 }
 
 /// Error context for better diagnostics
@@ -289,7 +280,10 @@ impl Error {
         }
     }
 
-    pub fn auth_with_source(message: impl Into<String>, source: Box<dyn std::error::Error + Send + Sync>) -> Self {
+    pub fn auth_with_source(
+        message: impl Into<String>,
+        source: Box<dyn std::error::Error + Send + Sync>,
+    ) -> Self {
         Self::Auth {
             message: message.into(),
             source: Some(source),
@@ -305,7 +299,10 @@ impl Error {
         }
     }
 
-    pub fn config_with_suggestion(message: impl Into<String>, suggestion: impl Into<String>) -> Self {
+    pub fn config_with_suggestion(
+        message: impl Into<String>,
+        suggestion: impl Into<String>,
+    ) -> Self {
         Self::Config {
             message: message.into(),
             source: None,
@@ -331,7 +328,10 @@ impl Error {
         }
     }
 
-    pub fn network_with_retry(message: impl Into<String>, retry_after: std::time::Duration) -> Self {
+    pub fn network_with_retry(
+        message: impl Into<String>,
+        retry_after: std::time::Duration,
+    ) -> Self {
         Self::Network {
             message: message.into(),
             source: None,
@@ -349,7 +349,11 @@ impl Error {
         }
     }
 
-    pub fn service_with_code(message: impl Into<String>, service_name: impl Into<String>, error_code: impl Into<String>) -> Self {
+    pub fn service_with_code(
+        message: impl Into<String>,
+        service_name: impl Into<String>,
+        error_code: impl Into<String>,
+    ) -> Self {
         Self::Service {
             message: message.into(),
             service_name: Some(service_name.into()),
@@ -379,7 +383,11 @@ impl Error {
         }
     }
 
-    pub fn parsing_with_format(message: impl Into<String>, expected: impl Into<String>, actual: Option<String>) -> Self {
+    pub fn parsing_with_format(
+        message: impl Into<String>,
+        expected: impl Into<String>,
+        actual: Option<String>,
+    ) -> Self {
         Self::Parsing {
             message: message.into(),
             expected_format: Some(expected.into()),
@@ -412,7 +420,11 @@ impl Error {
         }
     }
 
-    pub fn not_found_with_resource(message: impl Into<String>, resource_type: impl Into<String>, resource_id: impl Into<String>) -> Self {
+    pub fn not_found_with_resource(
+        message: impl Into<String>,
+        resource_type: impl Into<String>,
+        resource_id: impl Into<String>,
+    ) -> Self {
         Self::NotFound {
             message: message.into(),
             resource_type: Some(resource_type.into()),
@@ -428,7 +440,10 @@ impl Error {
         }
     }
 
-    pub fn internal_with_source(message: impl Into<String>, source: Box<dyn std::error::Error + Send + Sync>) -> Self {
+    pub fn internal_with_source(
+        message: impl Into<String>,
+        source: Box<dyn std::error::Error + Send + Sync>,
+    ) -> Self {
         Self::Internal {
             message: message.into(),
             operation: None,
@@ -453,7 +468,10 @@ impl Error {
         }
     }
 
-    pub fn connection_with_endpoint(message: impl Into<String>, endpoint: impl Into<String>) -> Self {
+    pub fn connection_with_endpoint(
+        message: impl Into<String>,
+        endpoint: impl Into<String>,
+    ) -> Self {
         Self::Connection {
             message: message.into(),
             endpoint: Some(endpoint.into()),
@@ -470,7 +488,10 @@ impl Error {
         }
     }
 
-    pub fn timeout_with_duration(message: impl Into<String>, duration: std::time::Duration) -> Self {
+    pub fn timeout_with_duration(
+        message: impl Into<String>,
+        duration: std::time::Duration,
+    ) -> Self {
         Self::Timeout {
             message: message.into(),
             operation: None,
@@ -495,7 +516,11 @@ impl Error {
         }
     }
 
-    pub fn api_with_status(message: impl Into<String>, api_name: impl Into<String>, status_code: u16) -> Self {
+    pub fn api_with_status(
+        message: impl Into<String>,
+        api_name: impl Into<String>,
+        status_code: u16,
+    ) -> Self {
         Self::Api {
             message: message.into(),
             api_name: Some(api_name.into()),
@@ -563,7 +588,7 @@ impl Error {
                 } else {
                     false
                 }
-            },
+            }
             Error::Io { .. } => false,
             Error::Config { .. } => false,
         }
@@ -596,18 +621,47 @@ impl Error {
         match self {
             Error::Network { retry_after, .. } => {
                 if let Some(delay) = retry_after {
-                    RecoveryStrategy::Retry { max_attempts: 3, delay: *delay }
+                    RecoveryStrategy::Retry {
+                        max_attempts: 3,
+                        delay: *delay,
+                    }
                 } else {
-                    RecoveryStrategy::Retry { max_attempts: 3, delay: std::time::Duration::from_secs(1) }
+                    RecoveryStrategy::Retry {
+                        max_attempts: 3,
+                        delay: std::time::Duration::from_secs(1),
+                    }
                 }
+            }
+            Error::Connection { .. } => RecoveryStrategy::Retry {
+                max_attempts: 5,
+                delay: std::time::Duration::from_secs(2),
             },
-            Error::Connection { .. } => RecoveryStrategy::Retry { max_attempts: 5, delay: std::time::Duration::from_secs(2) },
-            Error::Timeout { .. } => RecoveryStrategy::Retry { max_attempts: 2, delay: std::time::Duration::from_secs(5) },
-            Error::Auth { recoverable: true, .. } => RecoveryStrategy::Manual { instructions: "Please check your credentials and try again".to_string() },
-            Error::Api { status_code: Some(code), .. } if *code >= 500 => RecoveryStrategy::Retry { max_attempts: 3, delay: std::time::Duration::from_secs(30) },
-            Error::Service { .. } => RecoveryStrategy::Fallback { alternative: "Try alternative service provider".to_string() },
+            Error::Timeout { .. } => RecoveryStrategy::Retry {
+                max_attempts: 2,
+                delay: std::time::Duration::from_secs(5),
+            },
+            Error::Auth {
+                recoverable: true, ..
+            } => RecoveryStrategy::Manual {
+                instructions: "Please check your credentials and try again".to_string(),
+            },
+            Error::Api {
+                status_code: Some(code),
+                ..
+            } if *code >= 500 => RecoveryStrategy::Retry {
+                max_attempts: 3,
+                delay: std::time::Duration::from_secs(30),
+            },
+            Error::Service { .. } => RecoveryStrategy::Fallback {
+                alternative: "Try alternative service provider".to_string(),
+            },
             Error::NotFound { .. } => RecoveryStrategy::Skip,
-            Error::Capability { alternative: Some(alt), .. } => RecoveryStrategy::Fallback { alternative: alt.clone() },
+            Error::Capability {
+                alternative: Some(alt),
+                ..
+            } => RecoveryStrategy::Fallback {
+                alternative: alt.clone(),
+            },
             _ => RecoveryStrategy::Fail,
         }
     }
@@ -617,7 +671,9 @@ impl Error {
         let severity = match &self {
             Error::Internal { .. } => ErrorSeverity::Critical,
             Error::Auth { .. } => ErrorSeverity::Error,
-            Error::Network { .. } | Error::Connection { .. } | Error::Timeout { .. } => ErrorSeverity::Warning,
+            Error::Network { .. } | Error::Connection { .. } | Error::Timeout { .. } => {
+                ErrorSeverity::Warning
+            }
             Error::NotFound { .. } | Error::Validation { .. } => ErrorSeverity::Info,
             _ => ErrorSeverity::Error,
         };
@@ -677,7 +733,10 @@ impl TransportError {
         }
     }
 
-    pub fn rate_limited(message: impl Into<String>, retry_after: Option<std::time::Duration>) -> Self {
+    pub fn rate_limited(
+        message: impl Into<String>,
+        retry_after: Option<std::time::Duration>,
+    ) -> Self {
         Self::RateLimitExceeded {
             message: message.into(),
             retry_after,
@@ -690,7 +749,10 @@ impl TransportError {
         }
     }
 
-    pub fn request_timeout(message: impl Into<String>, duration: Option<std::time::Duration>) -> Self {
+    pub fn request_timeout(
+        message: impl Into<String>,
+        duration: Option<std::time::Duration>,
+    ) -> Self {
         Self::RequestTimeout {
             message: message.into(),
             duration,
@@ -701,7 +763,7 @@ impl TransportError {
         match self {
             Self::ConnectionFailed { .. } => true,
             Self::RequestFailed { .. } => true,
-            Self::Protocol { code, .. } => *code >= -32000 && *code <= -32099, // JSON-RPC recoverable errors
+            Self::Protocol { code, .. } => *code <= -32000 && *code >= -32099, // JSON-RPC recoverable errors
             Self::Serialization { .. } => false,
             Self::AuthenticationFailed { .. } => true,
             Self::RateLimitExceeded { .. } => true,
@@ -792,11 +854,7 @@ impl From<std::io::Error> for Error {
 
 impl From<serde_json::Error> for Error {
     fn from(err: serde_json::Error) -> Self {
-        Error::parsing_with_format(
-            format!("JSON parsing failed: {}", err),
-            "valid JSON",
-            None
-        )
+        Error::parsing_with_format(format!("JSON parsing failed: {}", err), "valid JSON", None)
     }
 }
 
@@ -826,7 +884,7 @@ impl From<chrono::ParseError> for Error {
         Error::parsing_with_format(
             format!("Date/time parsing failed: {}", err),
             "valid datetime format",
-            None
+            None,
         )
     }
 }
@@ -846,6 +904,19 @@ impl<T> From<PoisonError<T>> for Error {
 impl From<SystemTimeError> for Error {
     fn from(err: SystemTimeError) -> Self {
         Error::internal(format!("System time error: {}", err))
+    }
+}
+
+#[cfg(feature = "database")]
+impl From<sqlx::Error> for Error {
+    fn from(err: sqlx::Error) -> Self {
+        match err {
+            sqlx::Error::RowNotFound => Error::not_found("Database row not found"),
+            sqlx::Error::Database(db_err) => Error::service(format!("Database error: {}", db_err)),
+            sqlx::Error::Io(io_err) => Error::io(io_err.to_string()),
+            sqlx::Error::Tls(tls_err) => Error::network(format!("TLS error: {}", tls_err)),
+            _ => Error::service(format!("Database error: {}", err)),
+        }
     }
 }
 
@@ -873,7 +944,7 @@ pub mod utils {
 
         loop {
             attempts += 1;
-            
+
             match operation().await {
                 Ok(result) => return Ok(result),
                 Err(err) if attempts >= max_attempts => return Err(err),
@@ -885,10 +956,10 @@ pub mod utils {
                         error = %err,
                         "Retrying operation after error"
                     );
-                    
+
                     tokio::time::sleep(delay).await;
                     delay = std::cmp::min(delay.saturating_mul(2), MAX_DELAY); // Prevent overflow
-                },
+                }
                 Err(err) => return Err(err), // Non-recoverable error
             }
         }
@@ -896,7 +967,7 @@ pub mod utils {
 
     /// Execute multiple operations and collect successful results with pre-allocation
     pub async fn collect_results<T, E>(
-        results: Vec<std::result::Result<T, E>>
+        results: Vec<std::result::Result<T, E>>,
     ) -> (Vec<T>, Vec<E>) {
         let total_len = results.len();
         let mut successes = Vec::with_capacity(total_len);
@@ -933,13 +1004,15 @@ pub mod utils {
                     error = %err,
                     "Primary operation failed, attempting fallback"
                 );
-                
+
                 fallback.await.map_err(|fallback_err| {
                     let context = ErrorContext::new(operation_name, "fallback")
                         .with_metadata("primary_error", err.to_string())
                         .with_metadata("fallback_error", fallback_err.to_string());
-                    
-                    Error::internal("Both primary and fallback operations failed").with_context(context).error
+
+                    Error::internal("Both primary and fallback operations failed")
+                        .with_context(context)
+                        .error
                 })
             }
         }
@@ -959,8 +1032,10 @@ pub mod utils {
             Err(_) => {
                 let context = ErrorContext::new(operation_name, "timeout")
                     .with_metadata("timeout_seconds", timeout.as_secs().to_string());
-                
-                Err(Error::timeout(Cow::Borrowed("Operation timed out")).with_context(context).error)
+
+                Err(Error::timeout(Cow::Borrowed("Operation timed out"))
+                    .with_context(context)
+                    .error)
             }
         }
     }
@@ -982,7 +1057,7 @@ pub mod utils {
 
         let total_items = items.len();
         let mut results = Vec::with_capacity(total_items);
-        
+
         // Process in optimized chunks
         for chunk in items.chunks(batch_size) {
             let batch_results = processor(chunk.to_vec()).await?;
@@ -996,14 +1071,14 @@ pub mod utils {
     pub fn format_error_message(template: &str, args: &[(&str, &dyn std::fmt::Display)]) -> String {
         let mut message = String::with_capacity(template.len() + args.len() * 16); // Estimate capacity
         message.push_str(template);
-        
+
         for (key, value) in args {
             let placeholder = format!("{{{}}}", key);
             if let Some(pos) = message.find(&placeholder) {
                 message.replace_range(pos..pos + placeholder.len(), &value.to_string());
             }
         }
-        
+
         message
     }
 }
@@ -1015,7 +1090,10 @@ where
 {
     match tokio::time::timeout(duration, future).await {
         Ok(result) => result,
-        Err(_) => Err(Error::timeout(format!("Operation timed out after {:?}", duration))),
+        Err(_) => Err(Error::timeout(format!(
+            "Operation timed out after {:?}",
+            duration
+        ))),
     }
 }
 
@@ -1045,7 +1123,10 @@ mod tests {
 
         assert_eq!(contextual_err.context.operation, "test_operation");
         assert_eq!(contextual_err.context.module, "test_module");
-        assert_eq!(contextual_err.context.request_id, Some("req_123".to_string()));
+        assert_eq!(
+            contextual_err.context.request_id,
+            Some("req_123".to_string())
+        );
     }
 
     #[test]
@@ -1062,27 +1143,28 @@ mod tests {
 
     #[tokio::test]
     async fn test_retry_with_backoff() {
-        let mut attempt_count = 0;
-        
-        let operation = || {
-            attempt_count += 1;
-            async move {
-                if attempt_count < 3 {
-                    Err(Error::network("Temporary failure"))
-                } else {
-                    Ok("Success")
+        let attempt_count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+
+        let operation = {
+            let attempt_count = attempt_count.clone();
+            move || {
+                let count = attempt_count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+                async move {
+                    if count < 3 {
+                        // Use connection error which is always recoverable
+                        Err(Error::connection("Temporary failure"))
+                    } else {
+                        Ok("Success")
+                    }
                 }
             }
         };
 
-        let result = utils::retry_with_backoff(
-            operation,
-            5,
-            std::time::Duration::from_millis(10)
-        ).await;
+        let result =
+            utils::retry_with_backoff(operation, 5, std::time::Duration::from_millis(10)).await;
 
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), "Success");
-        assert_eq!(attempt_count, 3);
+        assert_eq!(attempt_count.load(std::sync::atomic::Ordering::SeqCst), 3);
     }
-} 
+}

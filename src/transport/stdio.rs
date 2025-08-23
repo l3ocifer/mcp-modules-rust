@@ -1,12 +1,15 @@
-use crate::transport::{Transport, TransportError, Notification, NotificationHandler};
 use crate::error::{Error, Result};
+use crate::transport::{Notification, NotificationHandler, Transport, TransportError};
 use async_trait::async_trait;
 use serde_json::Value;
-use tokio::process::{Command, Child, ChildStdin, ChildStdout, ChildStderr};
 use std::process::Stdio;
 use std::sync::Arc;
-use tokio::sync::Mutex;
 use tokio::io::{AsyncWriteExt, BufReader, BufWriter};
+use tokio::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command};
+use tokio::sync::Mutex;
+
+// Type alias to reduce complexity
+type NotificationHandlerVec = Arc<Mutex<Vec<NotificationHandler>>>;
 
 /// Stdio transport implementation for MCP
 pub struct StdioTransport {
@@ -15,32 +18,40 @@ pub struct StdioTransport {
     stderr: Option<BufReader<ChildStderr>>,
     child: Option<Child>,
     /// Notification handlers
-    notification_handlers: Arc<Mutex<Vec<Box<dyn Fn(Notification) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<()>> + Send>> + Send + Sync>>>>,
+    notification_handlers: NotificationHandlerVec,
 }
 
 impl StdioTransport {
     /// Create a new stdio transport with a command
     pub async fn new(command: &str, args: Option<Vec<String>>) -> Result<Self> {
         let mut cmd = Command::new(command);
-        
+
         if let Some(args) = args {
             cmd.args(args);
         }
-        
+
         let mut child = cmd
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .spawn()
-            .map_err(|e| Error::internal(format!("Failed to spawn command '{}': {}", command, e)))?;
-            
-        let stdin = child.stdin.take()
+            .map_err(|e| {
+                Error::internal(format!("Failed to spawn command '{}': {}", command, e))
+            })?;
+
+        let stdin = child
+            .stdin
+            .take()
             .ok_or_else(|| Error::internal("Failed to capture stdin"))?;
-        let stdout = child.stdout.take()
+        let stdout = child
+            .stdout
+            .take()
             .ok_or_else(|| Error::internal("Failed to capture stdout"))?;
-        let stderr = child.stderr.take()
+        let stderr = child
+            .stderr
+            .take()
             .ok_or_else(|| Error::internal("Failed to capture stderr"))?;
-        
+
         Ok(Self {
             stdin: Some(BufWriter::new(stdin)),
             stdout: Some(BufReader::new(stdout)),
@@ -49,7 +60,7 @@ impl StdioTransport {
             notification_handlers: Arc::new(Mutex::new(Vec::new())),
         })
     }
-    
+
     /// Create a stdio transport using current process stdin/stdout
     pub fn from_current_process() -> Result<Self> {
         Ok(Self {
@@ -60,7 +71,7 @@ impl StdioTransport {
             notification_handlers: Arc::new(Mutex::new(Vec::new())),
         })
     }
-    
+
     /// Process incoming messages from stdio
     #[allow(dead_code)]
     async fn process_message(&self, _message: Value) -> std::result::Result<(), TransportError> {
@@ -72,19 +83,20 @@ impl StdioTransport {
 
     /// Get stdio implementation (simplified for now)
     pub fn with_stdio() -> Self {
-        Self::from_current_process().unwrap_or_else(|_| {
-            Self {
-                stdin: None,
-                stdout: None,
-                stderr: None,
-                child: None,
-                notification_handlers: Arc::new(Mutex::new(Vec::new())),
-            }
+        Self::from_current_process().unwrap_or_else(|_| Self {
+            stdin: None,
+            stdout: None,
+            stderr: None,
+            child: None,
+            notification_handlers: Arc::new(Mutex::new(Vec::new())),
         })
     }
 
     /// Create transport with specific stdin/stdout streams
-    pub async fn with_stdio_streams(stdin: ChildStdin, stdout: ChildStdout) -> std::result::Result<Self, TransportError> {
+    pub async fn with_stdio_streams(
+        stdin: ChildStdin,
+        stdout: ChildStdout,
+    ) -> std::result::Result<Self, TransportError> {
         Ok(Self {
             stdin: Some(BufWriter::new(stdin)),
             stdout: Some(BufReader::new(stdout)),
@@ -113,7 +125,11 @@ impl StdioTransport {
     pub async fn on_notification(&self, notification: Notification) -> Result<()> {
         let handlers = self.notification_handlers.lock().await;
         for handler in handlers.iter() {
-            handler(notification.clone()).await?;
+            handler(
+                notification.method.clone(),
+                notification.params.clone().unwrap_or_default(),
+            )
+            .await;
         }
         Ok(())
     }
@@ -133,17 +149,15 @@ impl std::fmt::Debug for StdioTransport {
 
 impl Default for StdioTransport {
     fn default() -> Self {
-        Self::from_current_process().unwrap_or_else(|_| {
-            Self {
-                stdin: None,
-                stdout: None,
-                stderr: None,
-                child: None,
-                notification_handlers: Arc::new(Mutex::new(Vec::new())),
-            }
+        Self::from_current_process().unwrap_or_else(|_| Self {
+            stdin: None,
+            stdout: None,
+            stderr: None,
+            child: None,
+            notification_handlers: Arc::new(Mutex::new(Vec::new())),
         })
     }
-} 
+}
 
 #[async_trait]
 impl Transport for StdioTransport {
@@ -154,14 +168,18 @@ impl Transport for StdioTransport {
 
     async fn disconnect(&mut self) -> std::result::Result<(), TransportError> {
         if let Some(ref mut child) = self.child {
-            let _ = child.kill();
+            std::mem::drop(child.kill());
         }
         Ok(())
     }
 
-    async fn request(&mut self, method: &str, params: Option<serde_json::Value>) -> std::result::Result<serde_json::Value, TransportError> {
+    async fn request(
+        &mut self,
+        method: &str,
+        params: Option<serde_json::Value>,
+    ) -> std::result::Result<serde_json::Value, TransportError> {
         let request_id = uuid::Uuid::new_v4().to_string();
-        
+
         let request = serde_json::json!({
             "jsonrpc": "2.0",
             "id": request_id,
@@ -173,11 +191,20 @@ impl Transport for StdioTransport {
             .map_err(|e| TransportError::send(format!("Failed to serialize request: {}", e)))?;
 
         if let Some(ref mut stdin) = self.stdin {
-            if let Err(e) = stdin.write_all(format!("{}\n", message_str).as_bytes()).await {
-                return Err(TransportError::send(format!("Failed to write to stdin: {}", e)));
+            if let Err(e) = stdin
+                .write_all(format!("{}\n", message_str).as_bytes())
+                .await
+            {
+                return Err(TransportError::send(format!(
+                    "Failed to write to stdin: {}",
+                    e
+                )));
             }
             if let Err(e) = stdin.flush().await {
-                return Err(TransportError::send(format!("Failed to flush stdin: {}", e)));
+                return Err(TransportError::send(format!(
+                    "Failed to flush stdin: {}",
+                    e
+                )));
             }
         }
 
@@ -185,30 +212,47 @@ impl Transport for StdioTransport {
         Ok(serde_json::json!({"result": "success"}))
     }
 
-    async fn notify(&mut self, method: &str, params: Option<serde_json::Value>) -> std::result::Result<(), TransportError> {
+    async fn notify(
+        &mut self,
+        method: &str,
+        params: Option<serde_json::Value>,
+    ) -> std::result::Result<(), TransportError> {
         let notification = serde_json::json!({
             "jsonrpc": "2.0",
             "method": method,
             "params": params
         });
 
-        let message_str = serde_json::to_string(&notification)
-            .map_err(|e| TransportError::send(format!("Failed to serialize notification: {}", e)))?;
+        let message_str = serde_json::to_string(&notification).map_err(|e| {
+            TransportError::send(format!("Failed to serialize notification: {}", e))
+        })?;
 
         if let Some(ref mut stdin) = self.stdin {
-            if let Err(e) = stdin.write_all(format!("{}\n", message_str).as_bytes()).await {
-                return Err(TransportError::send(format!("Failed to write notification: {}", e)));
+            if let Err(e) = stdin
+                .write_all(format!("{}\n", message_str).as_bytes())
+                .await
+            {
+                return Err(TransportError::send(format!(
+                    "Failed to write notification: {}",
+                    e
+                )));
             }
             if let Err(e) = stdin.flush().await {
-                return Err(TransportError::send(format!("Failed to flush notification: {}", e)));
+                return Err(TransportError::send(format!(
+                    "Failed to flush notification: {}",
+                    e
+                )));
             }
         }
 
         Ok(())
     }
 
-    async fn add_notification_handler(&mut self, _handler: NotificationHandler) -> std::result::Result<(), TransportError> {
+    async fn add_notification_handler(
+        &mut self,
+        _handler: NotificationHandler,
+    ) -> std::result::Result<(), TransportError> {
         // Store the handler for future notifications
         Ok(())
     }
-} 
+}

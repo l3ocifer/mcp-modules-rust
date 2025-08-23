@@ -1,19 +1,20 @@
 use crate::error::{Error, Result};
+use oauth2::{
+    basic::BasicClient, AccessToken, AuthUrl, AuthorizationCode, ClientId, ConfigurationError,
+    CsrfToken, PkceCodeChallenge, PkceCodeVerifier, RedirectUrl, RefreshToken, Scope,
+    StandardRevocableToken, TokenResponse, TokenUrl,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use oauth2::{
-    ClientId, RedirectUrl, Scope, TokenUrl,
-    AuthUrl, CsrfToken, PkceCodeChallenge, PkceCodeVerifier,
-    TokenResponse, AccessToken, RefreshToken, AuthorizationCode,
-    StandardRevocableToken, ConfigurationError,
-    basic::BasicClient,
-};
 
 // Type alias for the fully configured OAuth client
 type ConfiguredOAuthClient = oauth2::Client<
     oauth2::StandardErrorResponse<oauth2::basic::BasicErrorResponseType>,
     oauth2::StandardTokenResponse<oauth2::EmptyExtraTokenFields, oauth2::basic::BasicTokenType>,
-    oauth2::StandardTokenIntrospectionResponse<oauth2::EmptyExtraTokenFields, oauth2::basic::BasicTokenType>,
+    oauth2::StandardTokenIntrospectionResponse<
+        oauth2::EmptyExtraTokenFields,
+        oauth2::basic::BasicTokenType,
+    >,
     oauth2::StandardRevocableToken,
     oauth2::StandardErrorResponse<oauth2::RevocationErrorResponseType>,
     oauth2::EndpointSet,
@@ -154,9 +155,13 @@ impl OAuth21Client {
 
     /// Discover authorization server metadata (RFC 8414)
     pub async fn discover_metadata(&mut self) -> Result<()> {
-        let well_known_url = format!("{}/.well-known/oauth-authorization-server", self.auth_base_url);
-        
-        let response = self.http_client
+        let well_known_url = format!(
+            "{}/.well-known/oauth-authorization-server",
+            self.auth_base_url
+        );
+
+        let response = self
+            .http_client
             .get(&well_known_url)
             .header("MCP-Protocol-Version", "2025-06-18")
             .send()
@@ -168,7 +173,7 @@ impl OAuth21Client {
                 .json()
                 .await
                 .map_err(|e| Error::parsing(format!("Failed to parse metadata: {}", e)))?;
-                
+
             self.server_metadata = Some(metadata);
             Ok(())
         } else {
@@ -180,9 +185,15 @@ impl OAuth21Client {
                 registration_endpoint: Some(format!("{}/register", self.auth_base_url)),
                 revocation_endpoint: Some(format!("{}/revoke", self.auth_base_url)),
                 response_types_supported: vec!["code".to_string()],
-                grant_types_supported: Some(vec!["authorization_code".to_string(), "refresh_token".to_string()]),
+                grant_types_supported: Some(vec![
+                    "authorization_code".to_string(),
+                    "refresh_token".to_string(),
+                ]),
                 scopes_supported: Some(vec!["openid".to_string(), "mcp".to_string()]),
-                token_endpoint_auth_methods_supported: Some(vec!["none".to_string(), "client_secret_basic".to_string()]),
+                token_endpoint_auth_methods_supported: Some(vec![
+                    "none".to_string(),
+                    "client_secret_basic".to_string(),
+                ]),
                 require_request_uri_registration: Some(false),
                 code_challenge_methods_supported: Some(vec!["S256".to_string()]),
             });
@@ -191,15 +202,23 @@ impl OAuth21Client {
     }
 
     /// Register client dynamically (RFC 7591)
-    pub async fn register_client(&mut self, registration_request: ClientRegistrationRequest) -> Result<()> {
-        let _metadata = self.server_metadata.as_ref()
+    pub async fn register_client(
+        &mut self,
+        registration_request: ClientRegistrationRequest,
+    ) -> Result<()> {
+        let _metadata = self
+            .server_metadata
+            .as_ref()
             .ok_or_else(|| Error::auth("Server metadata not available".to_string()))?;
 
-        let registration_endpoint = self.server_metadata.as_ref()
+        let registration_endpoint = self
+            .server_metadata
+            .as_ref()
             .and_then(|m| m.registration_endpoint.as_ref())
             .ok_or_else(|| Error::auth("Registration endpoint not available".to_string()))?;
 
-        let response = self.http_client
+        let response = self
+            .http_client
             .post(registration_endpoint)
             .header("Content-Type", "application/json")
             .json(&registration_request)
@@ -208,25 +227,31 @@ impl OAuth21Client {
             .map_err(|e| Error::network(format!("Registration request failed: {}", e)))?;
 
         if response.status().is_success() {
-            let registration: ClientRegistration = response
-                .json()
-                .await
-                .map_err(|e| Error::parsing(format!("Failed to parse registration response: {}", e)))?;
-            
+            let registration: ClientRegistration = response.json().await.map_err(|e| {
+                Error::parsing(format!("Failed to parse registration response: {}", e))
+            })?;
+
             self.client_registration = Some(registration);
             Ok(())
         } else {
             let error_text = response.text().await.unwrap_or_default();
-            Err(Error::auth(format!("Client registration failed: {}", error_text)))
+            Err(Error::auth(format!(
+                "Client registration failed: {}",
+                error_text
+            )))
         }
     }
 
     /// Initialize OAuth client with discovered metadata and registered client
     pub fn init_oauth_client(&mut self) -> Result<()> {
-        let _metadata = self.server_metadata.as_ref()
+        let _metadata = self
+            .server_metadata
+            .as_ref()
             .ok_or_else(|| Error::auth("Server metadata not available".to_string()))?;
-            
-        let registration = self.client_registration.as_ref()
+
+        let registration = self
+            .client_registration
+            .as_ref()
             .ok_or_else(|| Error::auth("Client not registered".to_string()))?;
 
         // Create OAuth client with proper endpoint configuration
@@ -235,10 +260,11 @@ impl OAuth21Client {
             .map_err(|e| Error::config(format!("Invalid auth URL: {}", e)))?;
         let token_url = TokenUrl::new(self.auth_base_url.clone())
             .map_err(|e| Error::config(format!("Invalid token URL: {}", e)))?;
-        
+
         // Add a default revocation URL for the type system
-        let revocation_url = oauth2::RevocationUrl::new(format!("{}/revoke", self.auth_base_url))
-            .map_err(|e| Error::config(format!("Invalid revocation URL: {}", e)))?;
+        let revocation_url =
+            oauth2::RevocationUrl::new(format!("{}/revoke", self.auth_base_url))
+                .map_err(|e| Error::config(format!("Invalid revocation URL: {}", e)))?;
 
         // Build client with all required endpoints to match the type
         let client: ConfiguredOAuthClient = BasicClient::new(client_id)
@@ -258,7 +284,9 @@ impl OAuth21Client {
         scopes: Vec<String>,
         resource_indicators: Option<Vec<ResourceIndicator>>,
     ) -> Result<String> {
-        let client = self.oauth_client.as_ref()
+        let client = self
+            .oauth_client
+            .as_ref()
             .ok_or_else(|| Error::auth("OAuth client not initialized".to_string()))?;
 
         // Generate PKCE challenge
@@ -278,15 +306,16 @@ impl OAuth21Client {
         }
 
         let (auth_url, _csrf_token) = auth_request.url();
-        
+
         // Add resource indicators as query parameters if provided (RFC 8707)
         let mut final_url = auth_url;
         if let Some(indicators) = resource_indicators {
             let mut url = Url::parse(final_url.as_ref())
                 .map_err(|e| Error::auth(format!("Invalid URL: {}", e)))?;
-            
+
             for indicator in indicators {
-                url.query_pairs_mut().append_pair("resource", &indicator.resource);
+                url.query_pairs_mut()
+                    .append_pair("resource", &indicator.resource);
                 if let Some(audience) = indicator.audience {
                     for aud in audience {
                         url.query_pairs_mut().append_pair("audience", &aud);
@@ -300,11 +329,19 @@ impl OAuth21Client {
     }
 
     /// Exchange authorization code for access token
-    pub async fn exchange_code(&mut self, code: String, resource_indicators: Option<Vec<ResourceIndicator>>) -> Result<OAuthToken> {
-        let client = self.oauth_client.as_ref()
+    pub async fn exchange_code(
+        &mut self,
+        code: String,
+        resource_indicators: Option<Vec<ResourceIndicator>>,
+    ) -> Result<OAuthToken> {
+        let client = self
+            .oauth_client
+            .as_ref()
             .ok_or_else(|| Error::auth("OAuth client not initialized".to_string()))?;
 
-        let pkce_verifier = self.pkce_verifier.take()
+        let pkce_verifier = self
+            .pkce_verifier
+            .take()
             .ok_or_else(|| Error::auth("PKCE verifier not found".to_string()))?;
 
         let mut token_request = client
@@ -337,11 +374,11 @@ impl OAuth21Client {
         // Store tokens
         self.access_token = Some(token_response.access_token().clone());
         self.refresh_token = token_response.refresh_token().cloned();
-        
+
         // Calculate expiration time
-        self.token_expires_at = token_response.expires_in().map(|duration| {
-            SystemTime::now() + duration
-        });
+        self.token_expires_at = token_response
+            .expires_in()
+            .map(|duration| SystemTime::now() + duration);
 
         Ok(OAuthToken {
             access_token: token_response.access_token().secret().clone(),
@@ -354,10 +391,14 @@ impl OAuth21Client {
 
     /// Refresh access token
     pub async fn refresh_token(&mut self) -> Result<OAuthToken> {
-        let client = self.oauth_client.as_ref()
+        let client = self
+            .oauth_client
+            .as_ref()
             .ok_or_else(|| Error::auth("OAuth client not initialized".to_string()))?;
 
-        let refresh_token = self.refresh_token.as_ref()
+        let refresh_token = self
+            .refresh_token
+            .as_ref()
             .ok_or_else(|| Error::auth("No refresh token available".to_string()))?;
 
         // Create HTTP client for token refresh
@@ -377,11 +418,11 @@ impl OAuth21Client {
         if let Some(new_refresh_token) = token_response.refresh_token() {
             self.refresh_token = Some(new_refresh_token.clone());
         }
-        
+
         // Update expiration time
-        self.token_expires_at = token_response.expires_in().map(|duration| {
-            SystemTime::now() + duration
-        });
+        self.token_expires_at = token_response
+            .expires_in()
+            .map(|duration| SystemTime::now() + duration);
 
         Ok(OAuthToken {
             access_token: token_response.access_token().secret().clone(),
@@ -414,12 +455,14 @@ impl OAuth21Client {
 
     /// Revoke token
     pub async fn revoke_token(&mut self) -> Result<()> {
-        let client = self.oauth_client.as_ref()
+        let client = self
+            .oauth_client
+            .as_ref()
             .ok_or_else(|| Error::auth("OAuth client not initialized".to_string()))?;
 
         if let Some(access_token) = &self.access_token {
             let revocable_token = StandardRevocableToken::AccessToken(access_token.clone());
-            
+
             // Create HTTP client for token revocation
             let http_client = reqwest::ClientBuilder::new()
                 .redirect(reqwest::redirect::Policy::none())
@@ -428,7 +471,9 @@ impl OAuth21Client {
 
             client
                 .revoke_token(revocable_token)
-                .map_err(|e: ConfigurationError| Error::auth(format!("Token revocation not supported: {}", e)))?
+                .map_err(|e: ConfigurationError| {
+                    Error::auth(format!("Token revocation not supported: {}", e))
+                })?
                 .request_async(&http_client)
                 .await
                 .map_err(|e| Error::auth(format!("Token revocation failed: {}", e)))?;
@@ -466,9 +511,12 @@ impl Default for ClientRegistrationRequest {
             policy_uri: None,
             software_id: Some("mcp-client".to_string()),
             software_version: Some("2025-06-18".to_string()),
-            grant_types: Some(vec!["authorization_code".to_string(), "refresh_token".to_string()]),
+            grant_types: Some(vec![
+                "authorization_code".to_string(),
+                "refresh_token".to_string(),
+            ]),
             response_types: Some(vec!["code".to_string()]),
             token_endpoint_auth_method: Some("none".to_string()), // Public client
         }
     }
-} 
+}

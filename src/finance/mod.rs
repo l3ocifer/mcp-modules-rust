@@ -2,4 +2,6 @@
 pub mod alpaca;
 
 // Re-export key types
-pub use alpaca::{AlpacaClient, Account, Position, Quote, Bar, OrderSide, OrderType, TimeInForce, Order}; 
+pub use alpaca::{
+    Account, AlpacaClient, Bar, Order, OrderSide, OrderType, Position, Quote, TimeInForce,
+};

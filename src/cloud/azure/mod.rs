@@ -1,5 +1,5 @@
 /// Azure client module with comprehensive 2024-2025 API support
-/// 
+///
 /// Provides access to latest Azure services including:
 /// - Azure AI services and OpenAI integration
 /// - Container Apps with KEDA scaling
@@ -7,13 +7,11 @@
 /// - Azure Arc for hybrid/multi-cloud
 /// - Enhanced security with Defender for Cloud
 /// - Cost optimization with Azure Advisor
-
 use crate::cloud::{
-    AzureConfig, CloudResource, CloudProvider, SecurityAssessment, CostOptimization,
-    SecurityViolation, SecurityRecommendation, CostRecommendation,
-    ReservedInstanceRecommendation,
-    ViolationSeverity, RecommendationPriority, ComplexityLevel,
-    ReservedInstanceTerm, PaymentOption,
+    AzureConfig, CloudProvider, CloudResource, ComplexityLevel, CostOptimization,
+    CostRecommendation, PaymentOption, RecommendationPriority, ReservedInstanceRecommendation,
+    ReservedInstanceTerm, SecurityAssessment, SecurityRecommendation, SecurityViolation,
+    ViolationSeverity,
 };
 use crate::error::{Error, Result};
 use crate::lifecycle::LifecycleManager;
@@ -736,9 +734,9 @@ impl AzureClient {
     pub fn new(config: AzureConfig, lifecycle: Arc<LifecycleManager>) -> Result<Self> {
         // Check if Azure CLI is available
         Self::check_azure_cli()?;
-        
+
         let current_subscription = config.subscription_id.clone().unwrap_or_default();
-        
+
         Ok(Self {
             config,
             lifecycle,
@@ -746,58 +744,63 @@ impl AzureClient {
             current_subscription,
         })
     }
-    
+
     /// Check if Azure CLI is available and configured
     fn check_azure_cli() -> Result<()> {
         let output = std::process::Command::new("az")
             .arg("--version")
             .output()
             .map_err(|_| Error::config("Azure CLI not found. Please install Azure CLI"))?;
-            
+
         if !output.status.success() {
             return Err(Error::config("Azure CLI not properly configured"));
         }
-        
+
         Ok(())
     }
-    
+
     /// Execute Azure CLI command with proper authentication
     async fn execute_az_command(&self, args: &[&str]) -> Result<String> {
         let mut cmd = Command::new("az");
-        
+
         // Add subscription if available
         if !self.current_subscription.is_empty() {
-            cmd.args(&["--subscription", &self.current_subscription]);
+            cmd.args(["--subscription", &self.current_subscription]);
         }
-        
+
         // Add output format
-        cmd.args(&["--output", "json"]);
-        
+        cmd.args(["--output", "json"]);
+
         // Add arguments
         cmd.args(args);
-        
+
         // Execute command
-        let output = cmd.output().await
+        let output = cmd
+            .output()
+            .await
             .map_err(|e| Error::internal(format!("Failed to execute az command: {}", e)))?;
-            
+
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(Error::service(format!("Azure CLI command failed: {}", stderr)));
+            return Err(Error::service(format!(
+                "Azure CLI command failed: {}",
+                stderr
+            )));
         }
-        
+
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
-    
+
     /// List all cloud resources across services
     pub async fn list_resources(&self) -> Result<Vec<CloudResource>> {
         let mut resources = Vec::new();
-        
+
         // Virtual machines
         if let Ok(vms) = self.list_virtual_machines().await {
             for vm in vms {
                 let mut tags = vm.tags.clone().unwrap_or_default();
                 tags.insert("ResourceType".to_string(), "VirtualMachine".to_string());
-                
+
                 resources.push(CloudResource {
                     id: vm.id.clone(),
                     name: vm.name.clone(),
@@ -815,20 +818,25 @@ impl AzureClient {
                 });
             }
         }
-        
+
         // Storage accounts
         if let Ok(storage_accounts) = self.list_storage_accounts().await {
             for sa in storage_accounts {
                 let mut tags = sa.tags.clone().unwrap_or_default();
                 tags.insert("ResourceType".to_string(), "StorageAccount".to_string());
-                
-                let security_score = if sa.enable_https_traffic_only.unwrap_or(false) && 
-                    sa.minimum_tls_version.as_ref().unwrap_or(&"TLS1_0".to_string()) == "TLS1_2" {
+
+                let security_score = if sa.enable_https_traffic_only.unwrap_or(false)
+                    && sa
+                        .minimum_tls_version
+                        .as_ref()
+                        .unwrap_or(&"TLS1_0".to_string())
+                        == "TLS1_2"
+                {
                     85.0
                 } else {
                     60.0
                 };
-                
+
                 resources.push(CloudResource {
                     id: sa.id.clone(),
                     name: sa.name.clone(),
@@ -846,52 +854,48 @@ impl AzureClient {
                 });
             }
         }
-        
+
         Ok(resources)
     }
-    
+
     /// Get resource groups (keeping for compatibility)
     pub async fn list_resource_groups(&self) -> Result<Vec<ResourceGroup>> {
-        let output = self.execute_az_command(&[
-            "group", "list"
-        ]).await?;
-        
+        let output = self.execute_az_command(&["group", "list"]).await?;
+
         let groups_data: Vec<ResourceGroup> = serde_json::from_str(&output)
             .map_err(|e| Error::parsing(format!("Failed to parse resource groups: {}", e)))?;
-        
+
         Ok(groups_data)
     }
-    
+
     /// List virtual machines
     pub async fn list_virtual_machines(&self) -> Result<Vec<VirtualMachine>> {
-        let output = self.execute_az_command(&[
-            "vm", "list"
-        ]).await?;
-        
+        let output = self.execute_az_command(&["vm", "list"]).await?;
+
         let vms_data: Vec<VirtualMachine> = serde_json::from_str(&output)
             .map_err(|e| Error::parsing(format!("Failed to parse virtual machines: {}", e)))?;
-        
+
         Ok(vms_data)
     }
-    
+
     /// List storage accounts
     pub async fn list_storage_accounts(&self) -> Result<Vec<StorageAccount>> {
-        let output = self.execute_az_command(&[
-            "storage", "account", "list"
-        ]).await?;
-        
+        let output = self
+            .execute_az_command(&["storage", "account", "list"])
+            .await?;
+
         let storage_accounts: Vec<StorageAccount> = serde_json::from_str(&output)
             .map_err(|e| Error::parsing(format!("Failed to parse storage accounts: {}", e)))?;
-        
+
         Ok(storage_accounts)
     }
-    
+
     /// Perform comprehensive security assessment
     pub async fn security_assessment(&self) -> Result<SecurityAssessment> {
         let mut violations = Vec::new();
         let mut recommendations = Vec::new();
         let mut total_score: f64 = 100.0;
-        
+
         // Check VM security
         if let Ok(vms) = self.list_virtual_machines().await {
             for vm in vms {
@@ -909,7 +913,7 @@ impl AzureClient {
                         total_score -= 5.0;
                     }
                 }
-                
+
                 // Check disk encryption
                 if let Some(ref storage_profile) = vm.storage_profile {
                     if let Some(ref os_disk) = storage_profile.os_disk {
@@ -922,13 +926,17 @@ impl AzureClient {
                                 provider: CloudProvider::Azure,
                             });
                             total_score -= 15.0;
-                            
+
                             recommendations.push(SecurityRecommendation {
                                 id: format!("VM-ENC-{}", vm.name),
                                 title: "Enable disk encryption".to_string(),
-                                description: format!("Enable Azure Disk Encryption for VM {}", vm.name),
+                                description: format!(
+                                    "Enable Azure Disk Encryption for VM {}",
+                                    vm.name
+                                ),
                                 priority: RecommendationPriority::High,
-                                impact: "Protects data at rest from unauthorized access".to_string(),
+                                impact: "Protects data at rest from unauthorized access"
+                                    .to_string(),
                                 steps: vec![
                                     "Navigate to Virtual machines in Azure portal".to_string(),
                                     format!("Select VM {}", vm.name),
@@ -941,7 +949,7 @@ impl AzureClient {
                 }
             }
         }
-        
+
         // Check storage account security
         if let Ok(storage_accounts) = self.list_storage_accounts().await {
             for sa in storage_accounts {
@@ -956,9 +964,14 @@ impl AzureClient {
                     });
                     total_score -= 15.0;
                 }
-                
+
                 // Check TLS version
-                if sa.minimum_tls_version.as_ref().unwrap_or(&"TLS1_0".to_string()) != "TLS1_2" {
+                if sa
+                    .minimum_tls_version
+                    .as_ref()
+                    .unwrap_or(&"TLS1_0".to_string())
+                    != "TLS1_2"
+                {
                     violations.push(SecurityViolation {
                         resource_id: sa.id.clone(),
                         rule_id: "SA-002".to_string(),
@@ -970,7 +983,7 @@ impl AzureClient {
                 }
             }
         }
-        
+
         Ok(SecurityAssessment {
             overall_score: total_score.max(0.0),
             provider_scores: HashMap::from([(CloudProvider::Azure, total_score.max(0.0))]),
@@ -978,37 +991,40 @@ impl AzureClient {
             recommendations,
         })
     }
-    
+
     /// Generate cost optimization recommendations
     pub async fn cost_optimization(&self) -> Result<CostOptimization> {
         let mut recommendations = Vec::new();
         let rightsizing = Vec::new();
         let mut reserved_instances = Vec::new();
         let mut total_savings = 0.0;
-        
+
         // Analyze VMs for cost optimization
         if let Ok(vms) = self.list_virtual_machines().await {
             for vm in vms {
                 if vm.provisioning_state == "Succeeded" {
                     // Suggest Azure Hybrid Benefit for Windows VMs
-                    if vm.storage_profile.as_ref()
+                    if vm
+                        .storage_profile
+                        .as_ref()
                         .and_then(|sp| sp.os_disk.as_ref())
                         .and_then(|os| os.os_type.as_ref())
-                        .map_or(false, |os| os == "Windows") {
-                        
+                        .is_some_and(|os| os == "Windows")
+                    {
                         let estimated_savings = 200.0; // Placeholder
-                        
+
                         recommendations.push(CostRecommendation {
                             resource_id: vm.id.clone(),
                             recommendation_type: "Azure Hybrid Benefit".to_string(),
                             potential_savings: estimated_savings,
-                            description: "Apply Azure Hybrid Benefit for Windows Server licenses".to_string(),
+                            description: "Apply Azure Hybrid Benefit for Windows Server licenses"
+                                .to_string(),
                             complexity: ComplexityLevel::Low,
                         });
-                        
+
                         total_savings += estimated_savings;
                     }
-                    
+
                     // Reserved instances for long-running VMs
                     if let Some(ref hardware_profile) = vm.hardware_profile {
                         reserved_instances.push(ReservedInstanceRecommendation {
@@ -1022,16 +1038,17 @@ impl AzureClient {
                 }
             }
         }
-        
+
         // General recommendations
         recommendations.push(CostRecommendation {
             resource_id: "general".to_string(),
             recommendation_type: "Enable Azure Advisor".to_string(),
             potential_savings: 0.0,
-            description: "Use Azure Advisor for personalized cost optimization recommendations".to_string(),
+            description: "Use Azure Advisor for personalized cost optimization recommendations"
+                .to_string(),
             complexity: ComplexityLevel::Low,
         });
-        
+
         Ok(CostOptimization {
             total_potential_savings: total_savings,
             recommendations,
@@ -1039,32 +1056,32 @@ impl AzureClient {
             reserved_instance_recommendations: reserved_instances,
         })
     }
-    
+
     /// Get current subscription
     pub fn get_current_subscription(&self) -> &str {
         &self.current_subscription
     }
-    
+
     /// Set current subscription
     pub fn set_subscription(&mut self, subscription_id: String) {
         self.current_subscription = subscription_id;
     }
-    
+
     /// Get configuration
     pub fn get_config(&self) -> &AzureConfig {
         &self.config
     }
-    
+
     /// Get lifecycle manager
     pub fn get_lifecycle(&self) -> &Arc<LifecycleManager> {
         &self.lifecycle
     }
-    
+
     /// Get security module
     pub fn get_security(&self) -> &SecurityModule {
         &self.security
     }
-    
+
     /// Execute a resource script (placeholder for actual implementation)
     async fn execute_resource_script(&self, _script: &str) -> Result<serde_json::Value> {
         // This is a placeholder. In a real implementation, this would execute
@@ -1080,18 +1097,17 @@ impl AzureClient {
             "releases": []
         }))
     }
-    
+
     /// Extract content as JSON from response
     fn extract_content_as_json(response: &serde_json::Value) -> Result<&serde_json::Value> {
         Ok(response)
     }
-    
+
     /// Get current subscription ID
     fn get_subscription(&self) -> Result<Option<String>> {
         Ok(Some(self.current_subscription.clone()))
     }
-    
-    
+
     /* Commented out - duplicate method exists above
     /// List resource groups
     pub async fn list_resource_groups(&self) -> Result<Vec<ResourceGroup>> {
@@ -1100,7 +1116,7 @@ impl AzureClient {
             async function listResourceGroups() {
                 try {
                     const groups = [];
-                    
+
                     for await (const group of resourceClient.resourceGroups.list()) {
                         groups.push({
                             name: group.name,
@@ -1109,34 +1125,35 @@ impl AzureClient {
                             tags: group.tags
                         });
                     }
-                    
+
                     return { resourceGroups: groups };
                 } catch (error) {
                     throw new Error(`Failed to list resource groups: ${error.message}`);
                 }
             }
-            
+
             return await listResourceGroups();
         "#;
-        
+
         let response = self.execute_resource_script(script).await?;
-        
+
         // Parse resource groups from response
         let content = Self::extract_content_as_json(&response)?;
-        
+
         let groups_data = content.get("resourceGroups")
             .ok_or_else(|| Error::protocol("Missing 'resourceGroups' field in response".to_string()))?;
-            
+
         let groups: Vec<ResourceGroup> = serde_json::from_value(groups_data.clone())
             .map_err(|e| Error::protocol(format!("Failed to parse resource groups: {}", e)))?;
-            
+
         Ok(groups)
     }
     */
-    
+
     /// Get a resource group
     pub async fn get_resource_group(&self, name: &str) -> Result<ResourceGroup> {
-        let script = format!(r#"
+        let script = format!(
+            r#"
             // Get a specific resource group
             async function getResourceGroup() {{
                 try {{
@@ -1156,31 +1173,40 @@ impl AzureClient {
             }}
             
             return await getResourceGroup();
-        "#, name);
-        
+        "#,
+            name
+        );
+
         let response = self.execute_resource_script(&script).await?;
-        
+
         // Parse resource group from response
         let content = Self::extract_content_as_json(&response)?;
-        
-        let group_data = content.get("resourceGroup")
-            .ok_or_else(|| Error::protocol("Missing 'resourceGroup' field in response".to_string()))?;
-            
+
+        let group_data = content.get("resourceGroup").ok_or_else(|| {
+            Error::protocol("Missing 'resourceGroup' field in response".to_string())
+        })?;
+
         let group: ResourceGroup = serde_json::from_value(group_data.clone())
             .map_err(|e| Error::protocol(format!("Failed to parse resource group: {}", e)))?;
-            
+
         Ok(group)
     }
-    
+
     /// Create a resource group
-    pub async fn create_resource_group(&self, name: &str, location: &str, tags: Option<HashMap<String, String>>) -> Result<ResourceGroup> {
+    pub async fn create_resource_group(
+        &self,
+        name: &str,
+        location: &str,
+        tags: Option<HashMap<String, String>>,
+    ) -> Result<ResourceGroup> {
         let tags_json = match tags {
             Some(t) => serde_json::to_string(&t)
                 .map_err(|e| Error::internal(format!("Failed to serialize tags: {}", e)))?,
             None => "null".to_string(),
         };
-        
-        let script = format!(r#"
+
+        let script = format!(
+            r#"
             // Create a resource group
             async function createResourceGroup() {{
                 try {{
@@ -1205,25 +1231,29 @@ impl AzureClient {
             }}
             
             return await createResourceGroup();
-        "#, location, tags_json, name);
-        
+        "#,
+            location, tags_json, name
+        );
+
         let response = self.execute_resource_script(&script).await?;
-        
+
         // Parse resource group from response
         let content = Self::extract_content_as_json(&response)?;
-        
-        let group_data = content.get("resourceGroup")
-            .ok_or_else(|| Error::protocol("Missing 'resourceGroup' field in response".to_string()))?;
-            
+
+        let group_data = content.get("resourceGroup").ok_or_else(|| {
+            Error::protocol("Missing 'resourceGroup' field in response".to_string())
+        })?;
+
         let group: ResourceGroup = serde_json::from_value(group_data.clone())
             .map_err(|e| Error::protocol(format!("Failed to parse resource group: {}", e)))?;
-            
+
         Ok(group)
     }
-    
+
     /// Delete a resource group
     pub async fn delete_resource_group(&self, name: &str) -> Result<()> {
-        let script = format!(r#"
+        let script = format!(
+            r#"
             // Delete a resource group
             async function deleteResourceGroup() {{
                 try {{
@@ -1235,24 +1265,30 @@ impl AzureClient {
             }}
             
             return await deleteResourceGroup();
-        "#, name);
-        
+        "#,
+            name
+        );
+
         let response = self.execute_resource_script(&script).await?;
-        
+
         // Check success
         let content = Self::extract_content_as_json(&response)?;
-        
-        let success = content.get("success")
+
+        let success = content
+            .get("success")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
-            
+
         if success {
             Ok(())
         } else {
-            Err(Error::service(format!("Failed to delete resource group {}", name)))
+            Err(Error::service(format!(
+                "Failed to delete resource group {}",
+                name
+            )))
         }
     }
-    
+
     /* Commented out - duplicate method exists above with different signature
     /// List resources in a resource group
     pub async fn list_resources(&self, resource_group: Option<&str>) -> Result<Vec<Resource>> {
@@ -1260,20 +1296,20 @@ impl AzureClient {
             Some(rg) => format!(r#"resourceGroup eq '{}'"#, rg),
             None => "".to_string(),
         };
-        
+
         let script = format!(r#"
             // List resources
             async function listResources() {{
                 try {{
                     const resources = [];
                     const filter = {};
-                    
+
                     const options = {{
                         filter: filter
                     }};
-                    
+
                     const resourceList = resourceClient.resources.list({});
-                    
+
                     for await (const resource of resourceList) {{
                         resources.push({{
                             id: resource.id,
@@ -1283,38 +1319,38 @@ impl AzureClient {
                             tags: resource.tags
                         }});
                     }}
-                    
+
                     return {{ resources }};
                 }} catch (error) {{
                     throw new Error(`Failed to list resources: ${{error.message}}`);
                 }}
             }}
-            
+
             return await listResources();
-        "#, 
-        if filter.is_empty() { 
-            "undefined".to_string() 
-        } else { 
-            format!(r#""{}""#, filter) 
+        "#,
+        if filter.is_empty() {
+            "undefined".to_string()
+        } else {
+            format!(r#""{}""#, filter)
         },
         if filter.is_empty() { "" } else { "options" }
         );
-        
+
         let response = self.execute_resource_script(&script).await?;
-        
+
         // Parse resources from response
         let content = Self::extract_content_as_json(&response)?;
-        
+
         let resources_data = content.get("resources")
             .ok_or_else(|| Error::protocol("Missing 'resources' field in response".to_string()))?;
-            
+
         let resources: Vec<Resource> = serde_json::from_value(resources_data.clone())
             .map_err(|e| Error::protocol(format!("Failed to parse resources: {}", e)))?;
-            
+
         Ok(resources)
     }
     */
-    
+
     /// List subscriptions
     pub async fn list_subscriptions(&self) -> Result<Vec<Subscription>> {
         let script = r#"
@@ -1339,24 +1375,27 @@ impl AzureClient {
             
             return await listSubscriptions();
         "#;
-        
+
         let response = self.execute_resource_script(script).await?;
-        
+
         // Parse subscriptions from response
         let content = Self::extract_content_as_json(&response)?;
-        
-        let subscriptions_data = content.get("subscriptions")
-            .ok_or_else(|| Error::protocol("Missing 'subscriptions' field in response".to_string()))?;
-            
-        let subscriptions: Vec<Subscription> = serde_json::from_value(subscriptions_data.clone())
-            .map_err(|e| Error::protocol(format!("Failed to parse subscriptions: {}", e)))?;
-            
+
+        let subscriptions_data = content.get("subscriptions").ok_or_else(|| {
+            Error::protocol("Missing 'subscriptions' field in response".to_string())
+        })?;
+
+        let subscriptions: Vec<Subscription> =
+            serde_json::from_value(subscriptions_data.clone())
+                .map_err(|e| Error::protocol(format!("Failed to parse subscriptions: {}", e)))?;
+
         Ok(subscriptions)
     }
-    
+
     /// Get a specific subscription
     pub async fn get_subscription_by_id(&self, subscription_id: &str) -> Result<Subscription> {
-        let script = format!(r#"
+        let script = format!(
+            r#"
             // Get a specific subscription
             async function getSubscription() {{
                 try {{
@@ -1375,33 +1414,41 @@ impl AzureClient {
             }}
             
             return await getSubscription();
-        "#, subscription_id);
-        
+        "#,
+            subscription_id
+        );
+
         let response = self.execute_resource_script(&script).await?;
-        
+
         // Parse subscription from response
         let content = Self::extract_content_as_json(&response)?;
-        
-        let subscription_data = content.get("subscription")
-            .ok_or_else(|| Error::protocol("Missing 'subscription' field in response".to_string()))?;
-            
+
+        let subscription_data = content.get("subscription").ok_or_else(|| {
+            Error::protocol("Missing 'subscription' field in response".to_string())
+        })?;
+
         let subscription: Subscription = serde_json::from_value(subscription_data.clone())
             .map_err(|e| Error::protocol(format!("Failed to parse subscription: {}", e)))?;
-            
+
         Ok(subscription)
     }
-    
+
     /// List locations
     pub async fn list_locations(&self, subscription_id: Option<&str>) -> Result<Vec<Location>> {
         let subscription = match subscription_id {
             Some(sub) => sub.to_string(),
             None => match self.get_subscription()? {
                 Some(sub) => sub,
-                None => return Err(Error::validation("No subscription selected or provided".to_string())),
+                None => {
+                    return Err(Error::validation(
+                        "No subscription selected or provided".to_string(),
+                    ))
+                }
             },
         };
-        
-        let script = format!(r#"
+
+        let script = format!(
+            r#"
             // List locations
             async function listLocations() {{
                 try {{
@@ -1423,35 +1470,38 @@ impl AzureClient {
             }}
             
             return await listLocations();
-        "#, subscription);
-        
+        "#,
+            subscription
+        );
+
         let response = self.execute_resource_script(&script).await?;
-        
+
         // Parse locations from response
         let content = Self::extract_content_as_json(&response)?;
-        
-        let locations_data = content.get("locations")
+
+        let locations_data = content
+            .get("locations")
             .ok_or_else(|| Error::protocol("Missing 'locations' field in response".to_string()))?;
-            
+
         let locations: Vec<Location> = serde_json::from_value(locations_data.clone())
             .map_err(|e| Error::protocol(format!("Failed to parse locations: {}", e)))?;
-            
+
         Ok(locations)
     }
-    
+
     /* Commented out - duplicate method
     /// Extract JSON content from response
     fn extract_content_as_json(response: &Value) -> Result<Value> {
         let content = response.get("content")
             .ok_or_else(|| Error::protocol("Missing 'content' field in response".to_string()))?;
-            
+
         if !content.is_array() {
             return Err(Error::protocol("'content' field is not an array".to_string()));
         }
-        
+
         let content_array = content.as_array()
             .ok_or_else(|| Error::invalid_data("Expected array for container list"))?;
-        
+
         for item in content_array {
             if item.get("type").and_then(|t| t.as_str()) == Some("text") {
                 if let Some(text) = item.get("text").and_then(|t| t.as_str()) {
@@ -1460,15 +1510,15 @@ impl AzureClient {
                 }
             }
         }
-        
+
         Err(Error::protocol("No text content found in response".to_string()))
     }
     */
-    
+
     /// Get tool definitions
     pub fn get_tool_definitions(&self) -> Vec<ToolDefinition> {
         use crate::tools::ToolAnnotation;
-        
+
         vec![
             ToolDefinition::from_json_schema(
                 "list_resource_groups",
@@ -1479,8 +1529,13 @@ impl AzureClient {
                     "properties": {},
                     "required": []
                 }),
-                Some(ToolAnnotation::new("data_retrieval").with_description("List Azure resource groups")
-                    .with_usage_hints(vec!["Use to get all resource groups in subscription".to_string()]))
+                Some(
+                    ToolAnnotation::new("data_retrieval")
+                        .with_description("List Azure resource groups")
+                        .with_usage_hints(vec![
+                            "Use to get all resource groups in subscription".to_string()
+                        ]),
+                ),
             ),
             ToolDefinition::from_json_schema(
                 "get_resource_group",
@@ -1496,8 +1551,13 @@ impl AzureClient {
                     },
                     "required": ["name"]
                 }),
-                Some(ToolAnnotation::new("data_retrieval").with_description("Get details of an Azure resource group")
-                    .with_usage_hints(vec!["Use to get details of a specific resource group".to_string()]))
+                Some(
+                    ToolAnnotation::new("data_retrieval")
+                        .with_description("Get details of an Azure resource group")
+                        .with_usage_hints(vec![
+                            "Use to get details of a specific resource group".to_string()
+                        ]),
+                ),
             ),
             ToolDefinition::from_json_schema(
                 "create_resource_group",
@@ -1522,8 +1582,14 @@ impl AzureClient {
                     },
                     "required": ["name", "location"]
                 }),
-                Some(ToolAnnotation::new("resource_management").with_description("Create an Azure resource group")
-                    .with_security_notes(vec!["Requires confirmation".to_string(), "Has side effects".to_string()]))
+                Some(
+                    ToolAnnotation::new("resource_management")
+                        .with_description("Create an Azure resource group")
+                        .with_security_notes(vec![
+                            "Requires confirmation".to_string(),
+                            "Has side effects".to_string(),
+                        ]),
+                ),
             ),
             ToolDefinition::from_json_schema(
                 "delete_resource_group",
@@ -1539,8 +1605,14 @@ impl AzureClient {
                     },
                     "required": ["name"]
                 }),
-                Some(ToolAnnotation::new("resource_management").with_description("Delete an Azure resource group")
-                    .with_security_notes(vec!["Destructive operation".to_string(), "Requires confirmation".to_string()]))
+                Some(
+                    ToolAnnotation::new("resource_management")
+                        .with_description("Delete an Azure resource group")
+                        .with_security_notes(vec![
+                            "Destructive operation".to_string(),
+                            "Requires confirmation".to_string(),
+                        ]),
+                ),
             ),
             ToolDefinition::from_json_schema(
                 "list_resources",
@@ -1556,8 +1628,13 @@ impl AzureClient {
                     },
                     "required": []
                 }),
-                Some(ToolAnnotation::new("data_retrieval").with_description("List Azure resources")
-                    .with_usage_hints(vec!["Use to list all resources or filter by resource group".to_string()]))
+                Some(
+                    ToolAnnotation::new("data_retrieval")
+                        .with_description("List Azure resources")
+                        .with_usage_hints(vec![
+                            "Use to list all resources or filter by resource group".to_string(),
+                        ]),
+                ),
             ),
             ToolDefinition::from_json_schema(
                 "list_subscriptions",
@@ -1568,8 +1645,13 @@ impl AzureClient {
                     "properties": {},
                     "required": []
                 }),
-                Some(ToolAnnotation::new("data_retrieval").with_description("List Azure subscriptions")
-                    .with_usage_hints(vec!["Use to get all available Azure subscriptions".to_string()]))
+                Some(
+                    ToolAnnotation::new("data_retrieval")
+                        .with_description("List Azure subscriptions")
+                        .with_usage_hints(vec![
+                            "Use to get all available Azure subscriptions".to_string()
+                        ]),
+                ),
             ),
             ToolDefinition::from_json_schema(
                 "list_locations",
@@ -1585,8 +1667,11 @@ impl AzureClient {
                     },
                     "required": []
                 }),
-                Some(ToolAnnotation::new("data_retrieval").with_description("List Azure locations")
-                    .with_usage_hints(vec!["Use to get available Azure regions".to_string()]))
+                Some(
+                    ToolAnnotation::new("data_retrieval")
+                        .with_description("List Azure locations")
+                        .with_usage_hints(vec!["Use to get available Azure regions".to_string()]),
+                ),
             ),
         ]
     }
@@ -1594,7 +1679,8 @@ impl AzureClient {
     /// Azure DevOps work item methods
     /// List work items using WIQL query
     pub async fn list_work_items(&self, project: &str, query: &str) -> Result<WorkItemQueryResult> {
-        let script = format!(r#"
+        let script = format!(
+            r#"
             // List work items using WIQL query
             async function listWorkItems() {{
                 try {{
@@ -1637,32 +1723,31 @@ impl AzureClient {
             }}
             
             return await listWorkItems();
-        "#, query, project, project);
-        
+        "#,
+            query, project, project
+        );
+
         let response = self.execute_resource_script(&script).await?;
-        
+
         // Parse work items from response
         let content = Self::extract_content_as_json(&response)?;
-        
-        let work_items_data = content.get("workItems")
+
+        let work_items_data = content
+            .get("workItems")
             .ok_or_else(|| Error::protocol("Missing 'workItems' field in response".to_string()))?;
-            
-        let count = content.get("count")
-            .and_then(|c| c.as_u64())
-            .unwrap_or(0) as usize;
-            
+
+        let count = content.get("count").and_then(|c| c.as_u64()).unwrap_or(0) as usize;
+
         let work_items: Vec<WorkItem> = serde_json::from_value(work_items_data.clone())
             .map_err(|e| Error::protocol(format!("Failed to parse work items: {}", e)))?;
-            
-        Ok(WorkItemQueryResult {
-            work_items,
-            count,
-        })
+
+        Ok(WorkItemQueryResult { work_items, count })
     }
 
     /// Get work item by ID
     pub async fn get_work_item(&self, project: &str, id: i32) -> Result<WorkItem> {
-        let script = format!(r#"
+        let script = format!(
+            r#"
             // Get work item by ID
             async function getWorkItem() {{
                 try {{
@@ -1692,34 +1777,43 @@ impl AzureClient {
             }}
             
             return await getWorkItem();
-        "#, id, project, id);
-        
+        "#,
+            id, project, id
+        );
+
         let response = self.execute_resource_script(&script).await?;
-        
+
         // Parse work item from response
         let content = Self::extract_content_as_json(&response)?;
-        
-        let work_item_data = content.get("workItem")
+
+        let work_item_data = content
+            .get("workItem")
             .ok_or_else(|| Error::protocol("Missing 'workItem' field in response".to_string()))?;
-            
+
         let work_item: WorkItem = serde_json::from_value(work_item_data.clone())
             .map_err(|e| Error::protocol(format!("Failed to parse work item: {}", e)))?;
-            
+
         Ok(work_item)
     }
 
     /// Create a new work item
-    pub async fn create_work_item(&self, project: &str, work_item_type: &str, title: &str, fields: Option<HashMap<String, Value>>) -> Result<WorkItem> {
+    pub async fn create_work_item(
+        &self,
+        project: &str,
+        work_item_type: &str,
+        title: &str,
+        fields: Option<HashMap<String, Value>>,
+    ) -> Result<WorkItem> {
         // Construct document with operations
         let mut operations = Vec::new();
-        
+
         // Add title field
         operations.push(serde_json::json!({
             "op": "add",
             "path": "/fields/System.Title",
             "value": title
         }));
-        
+
         // Add additional fields if provided
         if let Some(field_map) = fields {
             for (field_name, field_value) in field_map {
@@ -1730,12 +1824,13 @@ impl AzureClient {
                 }));
             }
         }
-        
+
         // Serialize operations
         let operations_json = serde_json::to_string(&operations)
             .map_err(|e| Error::internal(format!("Failed to serialize operations: {}", e)))?;
 
-        let script = format!(r#"
+        let script = format!(
+            r#"
             // Create a new work item
             async function createWorkItem() {{
                 try {{
@@ -1769,27 +1864,35 @@ impl AzureClient {
             }}
             
             return await createWorkItem();
-        "#, operations_json, project, work_item_type);
-        
+        "#,
+            operations_json, project, work_item_type
+        );
+
         let response = self.execute_resource_script(&script).await?;
-        
+
         // Parse work item from response
         let content = Self::extract_content_as_json(&response)?;
-        
-        let work_item_data = content.get("workItem")
+
+        let work_item_data = content
+            .get("workItem")
             .ok_or_else(|| Error::protocol("Missing 'workItem' field in response".to_string()))?;
-            
+
         let work_item: WorkItem = serde_json::from_value(work_item_data.clone())
             .map_err(|e| Error::protocol(format!("Failed to parse work item: {}", e)))?;
-            
+
         Ok(work_item)
     }
 
     /// Update a work item
-    pub async fn update_work_item(&self, project: &str, id: i32, fields: HashMap<String, Value>) -> Result<WorkItem> {
+    pub async fn update_work_item(
+        &self,
+        project: &str,
+        id: i32,
+        fields: HashMap<String, Value>,
+    ) -> Result<WorkItem> {
         // Construct document with operations
         let mut operations = Vec::new();
-        
+
         // Add field operations
         for (field_name, field_value) in fields {
             operations.push(serde_json::json!({
@@ -1798,12 +1901,13 @@ impl AzureClient {
                 "value": field_value
             }));
         }
-        
+
         // Serialize operations
         let operations_json = serde_json::to_string(&operations)
             .map_err(|e| Error::internal(format!("Failed to serialize operations: {}", e)))?;
 
-        let script = format!(r#"
+        let script = format!(
+            r#"
             // Update a work item
             async function updateWorkItem() {{
                 try {{
@@ -1837,26 +1941,30 @@ impl AzureClient {
             }}
             
             return await updateWorkItem();
-        "#, operations_json, id, project, id);
-        
+        "#,
+            operations_json, id, project, id
+        );
+
         let response = self.execute_resource_script(&script).await?;
-        
+
         // Parse work item from response
         let content = Self::extract_content_as_json(&response)?;
-        
-        let work_item_data = content.get("workItem")
+
+        let work_item_data = content
+            .get("workItem")
             .ok_or_else(|| Error::protocol("Missing 'workItem' field in response".to_string()))?;
-            
+
         let work_item: WorkItem = serde_json::from_value(work_item_data.clone())
             .map_err(|e| Error::protocol(format!("Failed to parse work item: {}", e)))?;
-            
+
         Ok(work_item)
     }
 
     /// Azure DevOps build and release methods
     /// List build definitions
     pub async fn list_build_definitions(&self, project: &str) -> Result<Vec<BuildDefinition>> {
-        let script = format!(r#"
+        let script = format!(
+            r#"
             // List build definitions
             async function listBuildDefinitions() {{
                 try {{
@@ -1889,25 +1997,33 @@ impl AzureClient {
             }}
             
             return await listBuildDefinitions();
-        "#, project);
-        
+        "#,
+            project
+        );
+
         let response = self.execute_resource_script(&script).await?;
-        
+
         // Parse build definitions from response
         let content = Self::extract_content_as_json(&response)?;
-        
-        let definitions_data = content.get("definitions")
-            .ok_or_else(|| Error::protocol("Missing 'definitions' field in response".to_string()))?;
-            
+
+        let definitions_data = content.get("definitions").ok_or_else(|| {
+            Error::protocol("Missing 'definitions' field in response".to_string())
+        })?;
+
         let definitions: Vec<BuildDefinition> = serde_json::from_value(definitions_data.clone())
             .map_err(|e| Error::protocol(format!("Failed to parse build definitions: {}", e)))?;
-            
+
         Ok(definitions)
     }
-    
+
     /// Get a build definition
-    pub async fn get_build_definition(&self, project: &str, definition_id: i32) -> Result<BuildDefinition> {
-        let script = format!(r#"
+    pub async fn get_build_definition(
+        &self,
+        project: &str,
+        definition_id: i32,
+    ) -> Result<BuildDefinition> {
+        let script = format!(
+            r#"
             // Get a build definition
             async function getBuildDefinition() {{
                 try {{
@@ -1938,44 +2054,54 @@ impl AzureClient {
             }}
             
             return await getBuildDefinition();
-        "#, project, definition_id, definition_id);
-        
+        "#,
+            project, definition_id, definition_id
+        );
+
         let response = self.execute_resource_script(&script).await?;
-        
+
         // Parse build definition from response
         let content = Self::extract_content_as_json(&response)?;
-        
-        let definition_data = content.get("definition")
+
+        let definition_data = content
+            .get("definition")
             .ok_or_else(|| Error::protocol("Missing 'definition' field in response".to_string()))?;
-            
+
         let definition: BuildDefinition = serde_json::from_value(definition_data.clone())
             .map_err(|e| Error::protocol(format!("Failed to parse build definition: {}", e)))?;
-            
+
         Ok(definition)
     }
-    
+
     /// Queue a new build
-    pub async fn queue_build(&self, project: &str, definition_id: i32, source_branch: Option<&str>, parameters: Option<HashMap<String, Value>>) -> Result<Build> {
+    pub async fn queue_build(
+        &self,
+        project: &str,
+        definition_id: i32,
+        source_branch: Option<&str>,
+        parameters: Option<HashMap<String, Value>>,
+    ) -> Result<Build> {
         // Create build parameters
         let mut build_params = json!({
             "definition": {
                 "id": definition_id
             }
         });
-        
+
         if let Some(branch) = source_branch {
             build_params["sourceBranch"] = json!(branch);
         }
-        
+
         if let Some(params) = parameters {
             build_params["parameters"] = serde_json::to_value(params)
                 .map_err(|e| Error::internal(format!("Failed to serialize parameters: {}", e)))?;
         }
-        
+
         let build_params_json = serde_json::to_string(&build_params)
             .map_err(|e| Error::internal(format!("Failed to serialize build parameters: {}", e)))?;
-        
-        let script = format!(r#"
+
+        let script = format!(
+            r#"
             // Queue a new build
             async function queueBuild() {{
                 try {{
@@ -2013,56 +2139,64 @@ impl AzureClient {
             }}
             
             return await queueBuild();
-        "#, build_params_json, project);
-        
+        "#,
+            build_params_json, project
+        );
+
         let response = self.execute_resource_script(&script).await?;
-        
+
         // Parse build from response
         let content = Self::extract_content_as_json(&response)?;
-        
-        let build_data = content.get("build")
+
+        let build_data = content
+            .get("build")
             .ok_or_else(|| Error::protocol("Missing 'build' field in response".to_string()))?;
-            
+
         let build: Build = serde_json::from_value(build_data.clone())
             .map_err(|e| Error::protocol(format!("Failed to parse build: {}", e)))?;
-            
+
         Ok(build)
     }
-    
+
     /// List builds
-    pub async fn list_builds(&self, project: &str, params: Option<BuildQueryParams>) -> Result<Vec<Build>> {
+    pub async fn list_builds(
+        &self,
+        project: &str,
+        params: Option<BuildQueryParams>,
+    ) -> Result<Vec<Build>> {
         // Convert params to query parameters
         let mut query_params = Vec::new();
-        
+
         if let Some(p) = &params {
             if let Some(def_id) = p.definition_id {
                 query_params.push(format!("definitions={}", def_id));
             }
-            
+
             if let Some(branch) = &p.branch {
                 query_params.push(format!("branchName={}", branch));
             }
-            
+
             if let Some(status) = &p.status_filter {
                 query_params.push(format!("statusFilter={}", status));
             }
-            
+
             if let Some(result) = &p.result_filter {
                 query_params.push(format!("resultFilter={}", result));
             }
-            
+
             if let Some(top) = p.top {
                 query_params.push(format!("$top={}", top));
             }
         }
-        
+
         let _query_string = if query_params.is_empty() {
             "".to_string()
         } else {
             format!("&{}", query_params.join("&"))
         };
-        
-        let script = format!(r#"
+
+        let script = format!(
+            r#"
             // List builds
             async function listBuilds() {{
                 try {{
@@ -2106,25 +2240,29 @@ impl AzureClient {
             }}
             
             return await listBuilds();
-        "#, project);
-        
+        "#,
+            project
+        );
+
         let response = self.execute_resource_script(&script).await?;
-        
+
         // Parse builds from response
         let content = Self::extract_content_as_json(&response)?;
-        
-        let builds_data = content.get("builds")
+
+        let builds_data = content
+            .get("builds")
             .ok_or_else(|| Error::protocol("Missing 'builds' field in response".to_string()))?;
-            
+
         let builds: Vec<Build> = serde_json::from_value(builds_data.clone())
             .map_err(|e| Error::protocol(format!("Failed to parse builds: {}", e)))?;
-            
+
         Ok(builds)
     }
-    
+
     /// List release definitions
     pub async fn list_release_definitions(&self, project: &str) -> Result<Vec<ReleaseDefinition>> {
-        let script = format!(r#"
+        let script = format!(
+            r#"
             // List release definitions
             async function listReleaseDefinitions() {{
                 try {{
@@ -2151,43 +2289,54 @@ impl AzureClient {
             }}
             
             return await listReleaseDefinitions();
-        "#, project);
-        
+        "#,
+            project
+        );
+
         let response = self.execute_resource_script(&script).await?;
-        
+
         // Parse release definitions from response
         let content = Self::extract_content_as_json(&response)?;
-        
-        let definitions_data = content.get("definitions")
-            .ok_or_else(|| Error::protocol("Missing 'definitions' field in response".to_string()))?;
-            
+
+        let definitions_data = content.get("definitions").ok_or_else(|| {
+            Error::protocol("Missing 'definitions' field in response".to_string())
+        })?;
+
         let definitions: Vec<ReleaseDefinition> = serde_json::from_value(definitions_data.clone())
             .map_err(|e| Error::protocol(format!("Failed to parse release definitions: {}", e)))?;
-            
+
         Ok(definitions)
     }
-    
+
     /// Create a release
-    pub async fn create_release(&self, project: &str, definition_id: i32, description: Option<&str>, artifacts: Option<Vec<Value>>) -> Result<Release> {
+    pub async fn create_release(
+        &self,
+        project: &str,
+        definition_id: i32,
+        description: Option<&str>,
+        artifacts: Option<Vec<Value>>,
+    ) -> Result<Release> {
         // Create release parameters
         let mut release_params = json!({
             "definitionId": definition_id,
             "isDraft": false,
             "reason": "none"
         });
-        
+
         if let Some(desc) = description {
             release_params["description"] = json!(desc);
         }
-        
+
         if let Some(arts) = artifacts {
             release_params["artifacts"] = json!(arts);
         }
-        
-        let release_params_json = serde_json::to_string(&release_params)
-            .map_err(|e| Error::internal(format!("Failed to serialize release parameters: {}", e)))?;
-        
-        let script = format!(r#"
+
+        let release_params_json = serde_json::to_string(&release_params).map_err(|e| {
+            Error::internal(format!("Failed to serialize release parameters: {}", e))
+        })?;
+
+        let script = format!(
+            r#"
             // Create a release
             async function createRelease() {{
                 try {{
@@ -2222,19 +2371,22 @@ impl AzureClient {
             }}
             
             return await createRelease();
-        "#, release_params_json, project);
-        
+        "#,
+            release_params_json, project
+        );
+
         let response = self.execute_resource_script(&script).await?;
-        
+
         // Parse release from response
         let content = Self::extract_content_as_json(&response)?;
-        
-        let release_data = content.get("release")
+
+        let release_data = content
+            .get("release")
             .ok_or_else(|| Error::protocol("Missing 'release' field in response".to_string()))?;
-            
+
         let release: Release = serde_json::from_value(release_data.clone())
             .map_err(|e| Error::protocol(format!("Failed to parse release: {}", e)))?;
-            
+
         Ok(release)
     }
-} 
+}

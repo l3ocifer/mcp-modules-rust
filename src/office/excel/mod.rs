@@ -1,6 +1,6 @@
 use crate::error::{Error, Result};
 use crate::lifecycle::LifecycleManager;
-use crate::tools::{ToolDefinition, ToolAnnotation};
+use crate::tools::{ToolAnnotation, ToolDefinition};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
@@ -239,14 +239,22 @@ impl<'a> ExcelClient<'a> {
     }
 
     /// Update cell values
-    pub async fn update_cells(&self, workbook_id: &str, worksheet_id: &str, cells: Vec<(String, CellValue)>) -> Result<()> {
+    pub async fn update_cells(
+        &self,
+        workbook_id: &str,
+        worksheet_id: &str,
+        cells: Vec<(String, CellValue)>,
+    ) -> Result<()> {
         let method = "tools/execute";
-        let cell_updates = cells.iter().map(|(cell_ref, value)| {
-            json!({
-                "cell_ref": cell_ref,
-                "value": value
+        let cell_updates = cells
+            .iter()
+            .map(|(cell_ref, value)| {
+                json!({
+                    "cell_ref": cell_ref,
+                    "value": value
+                })
             })
-        }).collect::<Vec<Value>>();
+            .collect::<Vec<Value>>();
 
         let params = json!({
             "name": "update_cells",
@@ -282,7 +290,12 @@ impl<'a> ExcelClient<'a> {
     }
 
     /// Delete a row from a worksheet
-    pub async fn delete_row(&self, workbook_id: &str, worksheet_id: &str, row_index: u32) -> Result<()> {
+    pub async fn delete_row(
+        &self,
+        workbook_id: &str,
+        worksheet_id: &str,
+        row_index: u32,
+    ) -> Result<()> {
         let method = "tools/execute";
         let params = json!({
             "name": "delete_row",
@@ -298,7 +311,12 @@ impl<'a> ExcelClient<'a> {
     }
 
     /// Add a chart to a worksheet
-    pub async fn add_chart(&self, workbook_id: &str, worksheet_id: &str, chart: Chart) -> Result<String> {
+    pub async fn add_chart(
+        &self,
+        workbook_id: &str,
+        worksheet_id: &str,
+        chart: Chart,
+    ) -> Result<String> {
         let method = "tools/execute";
         let params = json!({
             "name": "add_chart",
@@ -319,7 +337,13 @@ impl<'a> ExcelClient<'a> {
     }
 
     /// Apply formula to a range of cells
-    pub async fn apply_formula(&self, workbook_id: &str, worksheet_id: &str, cell_range: &str, formula: &str) -> Result<()> {
+    pub async fn apply_formula(
+        &self,
+        workbook_id: &str,
+        worksheet_id: &str,
+        cell_range: &str,
+        formula: &str,
+    ) -> Result<()> {
         let method = "tools/execute";
         let params = json!({
             "name": "apply_formula",
@@ -336,7 +360,13 @@ impl<'a> ExcelClient<'a> {
     }
 
     /// Format a range of cells
-    pub async fn format_cells(&self, workbook_id: &str, worksheet_id: &str, cell_range: &str, format: CellFormat) -> Result<()> {
+    pub async fn format_cells(
+        &self,
+        workbook_id: &str,
+        worksheet_id: &str,
+        cell_range: &str,
+        format: CellFormat,
+    ) -> Result<()> {
         let method = "tools/execute";
         let params = json!({
             "name": "format_cells",
@@ -420,7 +450,10 @@ impl<'a> ExcelClient<'a> {
                     },
                     "required": ["title"]
                 }),
-                Some(ToolAnnotation::new("spreadsheet_creator").with_description("Creates a new workbook")),
+                Some(
+                    ToolAnnotation::new("spreadsheet_creator")
+                        .with_description("Creates a new workbook"),
+                ),
             ),
             ToolDefinition::from_json_schema(
                 "add_worksheet",
@@ -434,7 +467,10 @@ impl<'a> ExcelClient<'a> {
                     },
                     "required": ["workbook_id", "name"]
                 }),
-                Some(ToolAnnotation::new("worksheet_manager").with_description("Adds a worksheet to a workbook")),
+                Some(
+                    ToolAnnotation::new("worksheet_manager")
+                        .with_description("Adds a worksheet to a workbook"),
+                ),
             ),
             ToolDefinition::from_json_schema(
                 "delete_worksheet",
@@ -448,7 +484,10 @@ impl<'a> ExcelClient<'a> {
                     },
                     "required": ["workbook_id", "worksheet_id"]
                 }),
-                Some(ToolAnnotation::new("worksheet_manager").with_description("Deletes a worksheet")),
+                Some(
+                    ToolAnnotation::new("worksheet_manager")
+                        .with_description("Deletes a worksheet"),
+                ),
             ),
             ToolDefinition::from_json_schema(
                 "get_worksheets",
@@ -461,7 +500,10 @@ impl<'a> ExcelClient<'a> {
                     },
                     "required": ["workbook_id"]
                 }),
-                Some(ToolAnnotation::new("worksheet_manager").with_description("Gets all worksheets in a workbook")),
+                Some(
+                    ToolAnnotation::new("worksheet_manager")
+                        .with_description("Gets all worksheets in a workbook"),
+                ),
             ),
             ToolDefinition::from_json_schema(
                 "update_cells",
@@ -473,8 +515,8 @@ impl<'a> ExcelClient<'a> {
                         "workbook_id": {"type": "string", "description": "ID of the workbook"},
                         "worksheet_id": {"type": "string", "description": "ID of the worksheet"},
                         "cells": {
-                            "type": "array", 
-                            "description": "Cell updates", 
+                            "type": "array",
+                            "description": "Cell updates",
                             "items": {
                                 "type": "object",
                                 "properties": {
@@ -502,7 +544,10 @@ impl<'a> ExcelClient<'a> {
                     },
                     "required": ["workbook_id", "worksheet_id", "cells"]
                 }),
-                Some(ToolAnnotation::new("row_manager").with_description("Adds a row to a worksheet")),
+                Some(
+                    ToolAnnotation::new("row_manager")
+                        .with_description("Adds a row to a worksheet"),
+                ),
             ),
             ToolDefinition::from_json_schema(
                 "delete_row",
@@ -517,7 +562,10 @@ impl<'a> ExcelClient<'a> {
                     },
                     "required": ["workbook_id", "worksheet_id", "row_index"]
                 }),
-                Some(ToolAnnotation::new("row_manager").with_description("Deletes a row from a worksheet")),
+                Some(
+                    ToolAnnotation::new("row_manager")
+                        .with_description("Deletes a row from a worksheet"),
+                ),
             ),
             ToolDefinition::from_json_schema(
                 "add_chart",
@@ -534,7 +582,10 @@ impl<'a> ExcelClient<'a> {
                     },
                     "required": ["workbook_id", "worksheet_id", "chart_type", "title", "data_range"]
                 }),
-                Some(ToolAnnotation::new("chart_manager").with_description("Adds a chart to a worksheet")),
+                Some(
+                    ToolAnnotation::new("chart_manager")
+                        .with_description("Adds a chart to a worksheet"),
+                ),
             ),
             ToolDefinition::from_json_schema(
                 "apply_formula",
@@ -550,7 +601,10 @@ impl<'a> ExcelClient<'a> {
                     },
                     "required": ["workbook_id", "worksheet_id", "cell_range", "formula"]
                 }),
-                Some(ToolAnnotation::new("formula_manager").with_description("Applies a formula to cells")),
+                Some(
+                    ToolAnnotation::new("formula_manager")
+                        .with_description("Applies a formula to cells"),
+                ),
             ),
             ToolDefinition::from_json_schema(
                 "format_cells",
@@ -580,7 +634,10 @@ impl<'a> ExcelClient<'a> {
                     },
                     "required": ["workbook_id", "filepath"]
                 }),
-                Some(ToolAnnotation::new("workbook_manager").with_description("Saves a workbook to a file")),
+                Some(
+                    ToolAnnotation::new("workbook_manager")
+                        .with_description("Saves a workbook to a file"),
+                ),
             ),
             ToolDefinition::from_json_schema(
                 "load_workbook",
@@ -593,7 +650,10 @@ impl<'a> ExcelClient<'a> {
                     },
                     "required": ["filepath"]
                 }),
-                Some(ToolAnnotation::new("workbook_manager").with_description("Loads a workbook from a file")),
+                Some(
+                    ToolAnnotation::new("workbook_manager")
+                        .with_description("Loads a workbook from a file"),
+                ),
             ),
             ToolDefinition::from_json_schema(
                 "generate_spreadsheet",
@@ -606,7 +666,10 @@ impl<'a> ExcelClient<'a> {
                     },
                     "required": ["data_description"]
                 }),
-                Some(ToolAnnotation::new("spreadsheet_creator").with_description("Generates a spreadsheet using AI")),
+                Some(
+                    ToolAnnotation::new("spreadsheet_creator")
+                        .with_description("Generates a spreadsheet using AI"),
+                ),
             ),
         ]
     }

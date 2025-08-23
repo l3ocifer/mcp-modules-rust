@@ -1,6 +1,6 @@
 use crate::error::{Error, Result};
 use crate::lifecycle::LifecycleManager;
-use crate::tools::{ToolDefinition, ToolAnnotation};
+use crate::tools::{ToolAnnotation, ToolDefinition};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -143,23 +143,26 @@ impl<'a> WordClient<'a> {
         // Create sections
         for section in document.sections {
             let section_id = self.add_section(&document_id, section.clone()).await?;
-            
+
             // Add paragraphs
             for paragraph in &section.paragraphs {
-                self.add_paragraph(&document_id, section_id, paragraph.clone()).await?;
+                self.add_paragraph(&document_id, section_id, paragraph.clone())
+                    .await?;
             }
-            
+
             // Add tables if present
             if let Some(tables) = &section.tables {
                 for table in tables {
-                    self.add_table(&document_id, section_id, table.clone()).await?;
+                    self.add_table(&document_id, section_id, table.clone())
+                        .await?;
                 }
             }
-            
+
             // Add images if present
             if let Some(images) = &section.images {
                 for image in images {
-                    self.add_image(&document_id, section_id, image.clone()).await?;
+                    self.add_image(&document_id, section_id, image.clone())
+                        .await?;
                 }
             }
         }
@@ -190,20 +193,23 @@ impl<'a> WordClient<'a> {
 
         // Add content
         for paragraph in section.paragraphs {
-            self.add_paragraph(document_id, section_id as u32, paragraph).await?;
+            self.add_paragraph(document_id, section_id as u32, paragraph)
+                .await?;
         }
 
         // Add tables if present
         if let Some(tables) = section.tables {
             for table in tables {
-                self.add_table(document_id, section_id as u32, table).await?;
+                self.add_table(document_id, section_id as u32, table)
+                    .await?;
             }
         }
 
         // Add images if present
         if let Some(images) = section.images {
             for image in images {
-                self.add_image(document_id, section_id as u32, image).await?;
+                self.add_image(document_id, section_id as u32, image)
+                    .await?;
             }
         }
 
@@ -211,7 +217,12 @@ impl<'a> WordClient<'a> {
     }
 
     /// Update an existing section
-    pub async fn update_section(&self, document_id: &str, section_id: u32, title: Option<String>) -> Result<()> {
+    pub async fn update_section(
+        &self,
+        document_id: &str,
+        section_id: u32,
+        title: Option<String>,
+    ) -> Result<()> {
         let method = "tools/execute";
         let mut args = json!({
             "document_id": document_id,
@@ -264,7 +275,12 @@ impl<'a> WordClient<'a> {
     }
 
     /// Add a paragraph to a section
-    pub async fn add_paragraph(&self, document_id: &str, section_id: u32, paragraph: Paragraph) -> Result<u32> {
+    pub async fn add_paragraph(
+        &self,
+        document_id: &str,
+        section_id: u32,
+        paragraph: Paragraph,
+    ) -> Result<u32> {
         let method = "tools/execute";
         let params = json!({
             "name": "add_paragraph",
@@ -401,7 +417,10 @@ impl<'a> WordClient<'a> {
                     },
                     "required": ["title"]
                 }),
-                Some(ToolAnnotation::new("document_creator").with_description("Creates a new document"))
+                Some(
+                    ToolAnnotation::new("document_creator")
+                        .with_description("Creates a new document"),
+                ),
             ),
             ToolDefinition::from_json_schema(
                 "add_section",
@@ -415,7 +434,10 @@ impl<'a> WordClient<'a> {
                     },
                     "required": ["document_id"]
                 }),
-                Some(ToolAnnotation::new("section_manager").with_description("Adds a section to a document")),
+                Some(
+                    ToolAnnotation::new("section_manager")
+                        .with_description("Adds a section to a document"),
+                ),
             ),
             ToolDefinition::from_json_schema(
                 "update_section",
@@ -430,7 +452,10 @@ impl<'a> WordClient<'a> {
                     },
                     "required": ["document_id", "section_id"]
                 }),
-                Some(ToolAnnotation::new("section_manager").with_description("Updates an existing section")),
+                Some(
+                    ToolAnnotation::new("section_manager")
+                        .with_description("Updates an existing section"),
+                ),
             ),
             ToolDefinition::from_json_schema(
                 "delete_section",
@@ -457,7 +482,10 @@ impl<'a> WordClient<'a> {
                     },
                     "required": ["document_id"]
                 }),
-                Some(ToolAnnotation::new("section_manager").with_description("Gets all sections in a document")),
+                Some(
+                    ToolAnnotation::new("section_manager")
+                        .with_description("Gets all sections in a document"),
+                ),
             ),
             ToolDefinition::from_json_schema(
                 "add_paragraph",
@@ -472,7 +500,10 @@ impl<'a> WordClient<'a> {
                     },
                     "required": ["document_id", "section_id", "text"]
                 }),
-                Some(ToolAnnotation::new("content_manager").with_description("Adds a paragraph to a section")),
+                Some(
+                    ToolAnnotation::new("content_manager")
+                        .with_description("Adds a paragraph to a section"),
+                ),
             ),
             ToolDefinition::from_json_schema(
                 "add_table",
@@ -488,7 +519,10 @@ impl<'a> WordClient<'a> {
                     },
                     "required": ["document_id", "section_id", "rows"]
                 }),
-                Some(ToolAnnotation::new("content_manager").with_description("Adds a table to a section")),
+                Some(
+                    ToolAnnotation::new("content_manager")
+                        .with_description("Adds a table to a section"),
+                ),
             ),
             ToolDefinition::from_json_schema(
                 "add_image",
@@ -504,7 +538,10 @@ impl<'a> WordClient<'a> {
                     },
                     "required": ["document_id", "section_id", "image"]
                 }),
-                Some(ToolAnnotation::new("content_manager").with_description("Adds an image to a section")),
+                Some(
+                    ToolAnnotation::new("content_manager")
+                        .with_description("Adds an image to a section"),
+                ),
             ),
             ToolDefinition::from_json_schema(
                 "save_document",
@@ -518,7 +555,10 @@ impl<'a> WordClient<'a> {
                     },
                     "required": ["document_id", "filepath"]
                 }),
-                Some(ToolAnnotation::new("document_manager").with_description("Saves a document to a file")),
+                Some(
+                    ToolAnnotation::new("document_manager")
+                        .with_description("Saves a document to a file"),
+                ),
             ),
             ToolDefinition::from_json_schema(
                 "load_document",
@@ -531,7 +571,10 @@ impl<'a> WordClient<'a> {
                     },
                     "required": ["filepath"]
                 }),
-                Some(ToolAnnotation::new("document_manager").with_description("Loads a document from a file")),
+                Some(
+                    ToolAnnotation::new("document_manager")
+                        .with_description("Loads a document from a file"),
+                ),
             ),
             ToolDefinition::from_json_schema(
                 "generate_document",
@@ -545,7 +588,10 @@ impl<'a> WordClient<'a> {
                     },
                     "required": ["topic", "length"]
                 }),
-                Some(ToolAnnotation::new("document_creator").with_description("Generates a document using AI")),
+                Some(
+                    ToolAnnotation::new("document_creator")
+                        .with_description("Generates a document using AI"),
+                ),
             ),
         ]
     }

@@ -1,0 +1,139 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    environment: 'homelab'
+    cluster: 'mcp-cluster'
+
+rule_files:
+  - "/etc/prometheus/rules/*.yml"
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          # Add alertmanager if needed
+          # - alertmanager:9093
+
+scrape_configs:
+  # Main MCP Server (Ubuntu Desktop)
+  - job_name: 'mcp-ubuntu-primary'
+    static_configs:
+      - targets: ['mcp-server-main:8080']
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+    labels:
+      service: 'mcp-server'
+      role: 'primary'
+      location: 'ubuntu-desktop'
+
+  # Pi MCP Replicas (configured dynamically)
+  - job_name: 'mcp-pi-replicas'
+    static_configs:
+      - targets: 
+        # These will be dynamically updated by service discovery
+        # - 'pi1-ip:8080'
+        # - 'pi2-ip:8080'
+        # - 'pi3-ip:8080'
+    metrics_path: '/metrics'
+    scrape_interval: 15s
+    labels:
+      service: 'mcp-server'
+      role: 'replica'
+      location: 'raspberry-pi'
+
+  # Load Balancer Metrics
+  - job_name: 'haproxy'
+    static_configs:
+      - targets: ['haproxy:8404']
+    metrics_path: '/stats'
+    params:
+      stats: ['']
+    scrape_interval: 10s
+
+  # System Metrics - Ubuntu Desktop
+  - job_name: 'node-exporter-ubuntu'
+    static_configs:
+      - targets: ['YOUR_UBUNTU_IP:9100']
+    labels:
+      instance: 'ubuntu-desktop'
+      node_type: 'primary'
+
+  # System Metrics - Raspberry Pis
+  - job_name: 'node-exporter-pis'
+    static_configs:
+      - targets:
+        # Will be populated with Pi IPs
+        # - 'pi1-ip:9100'
+        # - 'pi2-ip:9100'
+        # - 'pi3-ip:9100'
+    labels:
+      node_type: 'raspberry-pi'
+
+  # Database Metrics
+  - job_name: 'postgres-exporter'
+    static_configs:
+      - targets: ['postgres-exporter:9187']
+    labels:
+      service: 'postgresql'
+
+  - job_name: 'mongodb-exporter'
+    static_configs:
+      - targets: ['mongodb-exporter:9216']
+    labels:
+      service: 'mongodb'
+
+  - job_name: 'redis-exporter'
+    static_configs:
+      - targets: ['redis-exporter:9121']
+    labels:
+      service: 'redis'
+
+  # Internal Services
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: 'grafana'
+    static_configs:
+      - targets: ['grafana:3000']
+    metrics_path: '/metrics'
+
+  # Docker Engine Metrics (if enabled)
+  - job_name: 'docker-ubuntu'
+    static_configs:
+      - targets: ['YOUR_UBUNTU_IP:9323']
+    labels:
+      instance: 'ubuntu-desktop'
+
+  - job_name: 'docker-pis'
+    static_configs:
+      - targets:
+        # Pi Docker metrics
+        # - 'pi1-ip:9323'
+        # - 'pi2-ip:9323'
+        # - 'pi3-ip:9323'
+    labels:
+      node_type: 'raspberry-pi'
+
+  # Coolify Metrics (if available)
+  - job_name: 'coolify'
+    static_configs:
+      - targets: ['YOUR_UBUNTU_IP:8000']
+    metrics_path: '/api/v1/metrics'
+    bearer_token: 'YOUR_COOLIFY_API_TOKEN'
+
+# Service Discovery for Dynamic Pi Registration
+  - job_name: 'mcp-service-discovery'
+    consul_sd_configs:
+      - server: 'consul:8500'
+        services: ['mcp-server']
+    relabel_configs:
+      - source_labels: [__meta_consul_tags]
+        regex: '.*,replica,.*'
+        target_label: role
+        replacement: 'replica'
+      - source_labels: [__meta_consul_tags]
+        regex: '.*,primary,.*'
+        target_label: role
+        replacement: 'primary'

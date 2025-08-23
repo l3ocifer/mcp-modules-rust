@@ -1,6 +1,6 @@
 use crate::error::{Error, Result};
 use crate::lifecycle::LifecycleManager;
-use crate::tools::{ToolDefinition, ToolAnnotation};
+use crate::tools::{ToolAnnotation, ToolDefinition};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -218,7 +218,12 @@ impl<'a> PowerPointClient<'a> {
     }
 
     /// Update an existing slide
-    pub async fn update_slide(&self, presentation_id: &str, slide_id: u32, slide: Slide) -> Result<()> {
+    pub async fn update_slide(
+        &self,
+        presentation_id: &str,
+        slide_id: u32,
+        slide: Slide,
+    ) -> Result<()> {
         let method = "tools/execute";
         let mut args = json!({
             "presentation_id": presentation_id,
@@ -338,7 +343,12 @@ impl<'a> PowerPointClient<'a> {
     }
 
     /// Generate a presentation from a template using AI
-    pub async fn generate_presentation(&self, topic: &str, num_slides: u32, theme: PresentationTheme) -> Result<String> {
+    pub async fn generate_presentation(
+        &self,
+        topic: &str,
+        num_slides: u32,
+        theme: PresentationTheme,
+    ) -> Result<String> {
         let method = "tools/execute";
         let params = json!({
             "name": "generate_presentation",
@@ -359,7 +369,12 @@ impl<'a> PowerPointClient<'a> {
     }
 
     /// Add an image to a slide
-    pub async fn add_image_to_slide(&self, presentation_id: &str, slide_id: u32, image: Image) -> Result<()> {
+    pub async fn add_image_to_slide(
+        &self,
+        presentation_id: &str,
+        slide_id: u32,
+        image: Image,
+    ) -> Result<()> {
         let method = "tools/execute";
         let params = json!({
             "name": "add_image_to_slide",
@@ -375,7 +390,11 @@ impl<'a> PowerPointClient<'a> {
     }
 
     /// Change the theme of a presentation
-    pub async fn change_theme(&self, presentation_id: &str, theme: PresentationTheme) -> Result<()> {
+    pub async fn change_theme(
+        &self,
+        presentation_id: &str,
+        theme: PresentationTheme,
+    ) -> Result<()> {
         let method = "tools/execute";
         let params = json!({
             "name": "change_theme",
@@ -404,7 +423,10 @@ impl<'a> PowerPointClient<'a> {
                     },
                     "required": ["title"]
                 }),
-                Some(ToolAnnotation::new("presentation_creator").with_description("Creates a new presentation"))
+                Some(
+                    ToolAnnotation::new("presentation_creator")
+                        .with_description("Creates a new presentation"),
+                ),
             ),
             ToolDefinition::from_json_schema(
                 "add_slide",
@@ -420,7 +442,10 @@ impl<'a> PowerPointClient<'a> {
                     },
                     "required": ["presentation_id", "title", "layout"]
                 }),
-                Some(ToolAnnotation::new("slide_manager").with_description("Adds a slide to a presentation")),
+                Some(
+                    ToolAnnotation::new("slide_manager")
+                        .with_description("Adds a slide to a presentation"),
+                ),
             ),
             ToolDefinition::from_json_schema(
                 "update_slide",
@@ -437,7 +462,10 @@ impl<'a> PowerPointClient<'a> {
                     },
                     "required": ["presentation_id", "slide_id"]
                 }),
-                Some(ToolAnnotation::new("slide_manager").with_description("Updates an existing slide")),
+                Some(
+                    ToolAnnotation::new("slide_manager")
+                        .with_description("Updates an existing slide"),
+                ),
             ),
             ToolDefinition::from_json_schema(
                 "delete_slide",
@@ -465,7 +493,10 @@ impl<'a> PowerPointClient<'a> {
                     },
                     "required": ["presentation_id", "slide_ids"]
                 }),
-                Some(ToolAnnotation::new("slide_manager").with_description("Reorders slides in a presentation")),
+                Some(
+                    ToolAnnotation::new("slide_manager")
+                        .with_description("Reorders slides in a presentation"),
+                ),
             ),
             ToolDefinition::from_json_schema(
                 "get_slides",
@@ -478,7 +509,10 @@ impl<'a> PowerPointClient<'a> {
                     },
                     "required": ["presentation_id"]
                 }),
-                Some(ToolAnnotation::new("slide_manager").with_description("Gets all slides in a presentation")),
+                Some(
+                    ToolAnnotation::new("slide_manager")
+                        .with_description("Gets all slides in a presentation"),
+                ),
             ),
             ToolDefinition::from_json_schema(
                 "save_presentation",
@@ -492,7 +526,10 @@ impl<'a> PowerPointClient<'a> {
                     },
                     "required": ["presentation_id", "filepath"]
                 }),
-                Some(ToolAnnotation::new("presentation_manager").with_description("Saves a presentation to a file")),
+                Some(
+                    ToolAnnotation::new("presentation_manager")
+                        .with_description("Saves a presentation to a file"),
+                ),
             ),
             ToolDefinition::from_json_schema(
                 "load_presentation",
@@ -505,7 +542,10 @@ impl<'a> PowerPointClient<'a> {
                     },
                     "required": ["filepath"]
                 }),
-                Some(ToolAnnotation::new("presentation_manager").with_description("Loads a presentation from a file")),
+                Some(
+                    ToolAnnotation::new("presentation_manager")
+                        .with_description("Loads a presentation from a file"),
+                ),
             ),
             ToolDefinition::from_json_schema(
                 "generate_presentation",
@@ -519,7 +559,10 @@ impl<'a> PowerPointClient<'a> {
                     },
                     "required": ["topic", "num_slides"]
                 }),
-                Some(ToolAnnotation::new("presentation_creator").with_description("Generates a presentation using AI")),
+                Some(
+                    ToolAnnotation::new("presentation_creator")
+                        .with_description("Generates a presentation using AI"),
+                ),
             ),
             ToolDefinition::from_json_schema(
                 "add_image_to_slide",
@@ -534,7 +577,10 @@ impl<'a> PowerPointClient<'a> {
                     },
                     "required": ["presentation_id", "slide_id", "image"]
                 }),
-                Some(ToolAnnotation::new("slide_manager").with_description("Adds an image to a slide")),
+                Some(
+                    ToolAnnotation::new("slide_manager")
+                        .with_description("Adds an image to a slide"),
+                ),
             ),
             ToolDefinition::from_json_schema(
                 "change_theme",
@@ -548,8 +594,11 @@ impl<'a> PowerPointClient<'a> {
                     },
                     "required": ["presentation_id", "theme"]
                 }),
-                Some(ToolAnnotation::new("presentation_manager").with_description("Changes the theme of a presentation")),
+                Some(
+                    ToolAnnotation::new("presentation_manager")
+                        .with_description("Changes the theme of a presentation"),
+                ),
             ),
         ]
     }
-} 
+}

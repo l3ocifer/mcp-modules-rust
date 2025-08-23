@@ -101,7 +101,12 @@ impl<'a> DeepResearchClient<'a> {
     }
 
     /// Research a topic in depth
-    pub async fn research_topic(&self, topic: &str, depth: u32, tone: ResearchTone) -> Result<ResearchReport> {
+    pub async fn research_topic(
+        &self,
+        topic: &str,
+        depth: u32,
+        tone: ResearchTone,
+    ) -> Result<ResearchReport> {
         let method = "tools/execute";
         let params = json!({
             "name": "deep_research",
@@ -115,7 +120,7 @@ impl<'a> DeepResearchClient<'a> {
         let response = self.lifecycle.call_method(method, Some(params)).await?;
         let report = serde_json::from_value(response)
             .map_err(|e| Error::parsing(format!("Failed to parse research report: {}", e)))?;
-        
+
         Ok(report)
     }
 
@@ -142,12 +147,16 @@ impl<'a> DeepResearchClient<'a> {
         let response = self.lifecycle.call_method(method, Some(params)).await?;
         let results = serde_json::from_value(response["results"].clone())
             .map_err(|e| Error::parsing(format!("Failed to parse search results: {}", e)))?;
-        
+
         Ok(results)
     }
 
     /// Summarize a document or research paper
-    pub async fn summarize_document(&self, url: &str, summary_length: Option<u32>) -> Result<String> {
+    pub async fn summarize_document(
+        &self,
+        url: &str,
+        summary_length: Option<u32>,
+    ) -> Result<String> {
         let method = "tools/execute";
         let mut args = json!({
             "url": url
@@ -171,12 +180,16 @@ impl<'a> DeepResearchClient<'a> {
             .as_str()
             .ok_or_else(|| Error::parsing("Failed to parse document summary".to_string()))?
             .to_string();
-        
+
         Ok(summary)
     }
 
     /// Find citations for a research topic
-    pub async fn find_citations(&self, topic: &str, num_citations: Option<u32>) -> Result<Vec<Citation>> {
+    pub async fn find_citations(
+        &self,
+        topic: &str,
+        num_citations: Option<u32>,
+    ) -> Result<Vec<Citation>> {
         let method = "tools/execute";
         let mut args = json!({
             "topic": topic
@@ -198,12 +211,16 @@ impl<'a> DeepResearchClient<'a> {
         let response = self.lifecycle.call_method(method, Some(params)).await?;
         let citations = serde_json::from_value(response["citations"].clone())
             .map_err(|e| Error::parsing(format!("Failed to parse citations: {}", e)))?;
-        
+
         Ok(citations)
     }
 
     /// Compare multiple topics or research areas
-    pub async fn compare_topics(&self, topics: Vec<String>, comparison_points: Option<Vec<String>>) -> Result<Value> {
+    pub async fn compare_topics(
+        &self,
+        topics: Vec<String>,
+        comparison_points: Option<Vec<String>>,
+    ) -> Result<Value> {
         let method = "tools/execute";
         let mut args = json!({
             "topics": topics
@@ -227,7 +244,11 @@ impl<'a> DeepResearchClient<'a> {
     }
 
     /// Generate a detailed research outline
-    pub async fn generate_outline(&self, topic: &str, depth: Option<u32>) -> Result<Vec<ResearchSection>> {
+    pub async fn generate_outline(
+        &self,
+        topic: &str,
+        depth: Option<u32>,
+    ) -> Result<Vec<ResearchSection>> {
         let method = "tools/execute";
         let mut args = json!({
             "topic": topic
@@ -249,7 +270,7 @@ impl<'a> DeepResearchClient<'a> {
         let response = self.lifecycle.call_method(method, Some(params)).await?;
         let outline = serde_json::from_value(response["outline"].clone())
             .map_err(|e| Error::parsing(format!("Failed to parse outline: {}", e)))?;
-        
+
         Ok(outline)
     }
 
@@ -275,7 +296,10 @@ impl<'a> DeepResearchClient<'a> {
                     },
                     "required": ["topic"]
                 }),
-                Some(crate::tools::ToolAnnotation::new("research").with_description("Research a topic in depth"))
+                Some(
+                    crate::tools::ToolAnnotation::new("research")
+                        .with_description("Research a topic in depth"),
+                ),
             ),
             ToolDefinition::from_json_schema(
                 "search",
@@ -296,7 +320,10 @@ impl<'a> DeepResearchClient<'a> {
                     },
                     "required": ["query"]
                 }),
-                Some(crate::tools::ToolAnnotation::new("search").with_description("Search for information on a specific topic"))
+                Some(
+                    crate::tools::ToolAnnotation::new("search")
+                        .with_description("Search for information on a specific topic"),
+                ),
             ),
             ToolDefinition::from_json_schema(
                 "summarize",
@@ -317,7 +344,10 @@ impl<'a> DeepResearchClient<'a> {
                     },
                     "required": ["content"]
                 }),
-                Some(crate::tools::ToolAnnotation::new("content_processing").with_description("Summarize a document or research paper"))
+                Some(
+                    crate::tools::ToolAnnotation::new("content_processing")
+                        .with_description("Summarize a document or research paper"),
+                ),
             ),
             ToolDefinition::from_json_schema(
                 "find_citations",
@@ -338,7 +368,10 @@ impl<'a> DeepResearchClient<'a> {
                     },
                     "required": ["topic"]
                 }),
-                Some(crate::tools::ToolAnnotation::new("academic_research").with_description("Find citations for a research topic"))
+                Some(
+                    crate::tools::ToolAnnotation::new("academic_research")
+                        .with_description("Find citations for a research topic"),
+                ),
             ),
             ToolDefinition::from_json_schema(
                 "compare_topics",
@@ -360,7 +393,10 @@ impl<'a> DeepResearchClient<'a> {
                     },
                     "required": ["topics"]
                 }),
-                Some(crate::tools::ToolAnnotation::new("comparative_analysis").with_description("Compare multiple topics or research areas"))
+                Some(
+                    crate::tools::ToolAnnotation::new("comparative_analysis")
+                        .with_description("Compare multiple topics or research areas"),
+                ),
             ),
             ToolDefinition::from_json_schema(
                 "generate_outline",
@@ -381,8 +417,11 @@ impl<'a> DeepResearchClient<'a> {
                     },
                     "required": ["topic"]
                 }),
-                Some(crate::tools::ToolAnnotation::new("content_planning").with_description("Generate a detailed research outline"))
+                Some(
+                    crate::tools::ToolAnnotation::new("content_planning")
+                        .with_description("Generate a detailed research outline"),
+                ),
             ),
         ]
     }
-} 
+}

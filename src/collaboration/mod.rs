@@ -21,17 +21,17 @@ impl CollaborationModule {
     /// Create a new collaboration module
     pub fn new() -> Self {
         Self {
-            lifecycle_manager: None
+            lifecycle_manager: None,
         }
     }
-    
+
     /// Create a new collaboration module with a specific lifecycle manager
     pub fn with_lifecycle(lifecycle: Arc<LifecycleManager>) -> Self {
         Self {
-            lifecycle_manager: Some(lifecycle)
+            lifecycle_manager: Some(lifecycle),
         }
     }
-    
+
     /// Check if collaboration capabilities are available
     pub async fn check_available(&self) -> Result<bool> {
         // This is a placeholder
@@ -168,4 +168,4 @@ pub struct User {
     pub phone: Option<String>,
     /// Additional user metadata
     pub metadata: Option<Value>,
-} 
+}

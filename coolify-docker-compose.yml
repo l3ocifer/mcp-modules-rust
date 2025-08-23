@@ -1,0 +1,330 @@
+version: '3.8'
+
+# Coolify-optimized Docker Compose for Homelab
+# This runs the heavy services on Ubuntu Desktop
+# Pis run lightweight MCP replicas via Coolify
+
+services:
+  # Main MCP Server (Ubuntu Desktop)
+  mcp-server-main:
+    build: .
+    ports:
+      - "8081:8080"  # Different port to avoid conflicts with load balancer
+    environment:
+      - MCP_HTTP_HOST=0.0.0.0
+      - MCP_HTTP_PORT=8080
+      - DATABASE_URL=postgresql://mcp:mcp_secure_password@postgres:5432/mcp_db
+      - MONGODB_URI=mongodb://mcp:mcp_secure_password@mongodb:27017/mcp?authSource=admin
+      - REDIS_URL=redis://redis:6379
+      - PROMETHEUS_URL=http://prometheus:9090
+      - RUST_LOG=devops_mcp=info,tower_http=debug
+      - NODE_ROLE=primary
+    depends_on:
+      - postgres
+      - mongodb
+      - redis
+    restart: unless-stopped
+    volumes:
+      - ./data/mcp:/app/data
+    networks:
+      - coolify-network
+    labels:
+      - "coolify.managed=true"
+      - "homelab.service=mcp-primary"
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '2.0'
+
+  # PostgreSQL (Ubuntu Desktop - needs stable storage)
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: mcp
+      POSTGRES_PASSWORD: mcp_secure_password
+      POSTGRES_DB: mcp_db
+      POSTGRES_SHARED_PRELOAD_LIBRARIES: pg_stat_statements
+      POSTGRES_MAX_CONNECTIONS: 200
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./config/postgres.conf:/etc/postgresql/postgresql.conf:ro
+      - ./backups/postgres:/backups
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mcp"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - coolify-network
+    labels:
+      - "coolify.managed=true"
+      - "homelab.service=database"
+    deploy:
+      resources:
+        limits:
+          memory: 8G
+          cpus: '4.0'
+
+  # MongoDB (Ubuntu Desktop - needs stable storage)
+  mongodb:
+    image: mongo:6
+    ports:
+      - "27017:27017"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: mcp
+      MONGO_INITDB_ROOT_PASSWORD: mcp_secure_password
+      MONGO_INITDB_DATABASE: mcp
+    volumes:
+      - mongo_data:/data/db
+      - ./config/mongod.conf:/etc/mongod.conf:ro
+      - ./backups/mongodb:/backups
+    restart: unless-stopped
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - coolify-network
+    labels:
+      - "coolify.managed=true"
+      - "homelab.service=database"
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2.0'
+
+  # Redis (Ubuntu Desktop primary, Pis will have replicas)
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+      - ./config/redis.conf:/usr/local/etc/redis/redis.conf:ro
+    command: redis-server /usr/local/etc/redis/redis.conf
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - coolify-network
+    labels:
+      - "coolify.managed=true"
+      - "homelab.service=cache"
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+
+  # Prometheus (Ubuntu Desktop - aggregates all metrics)
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus-homelab.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/rules:/etc/prometheus/rules:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--storage.tsdb.retention.time=90d'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+      - '--web.external-url=http://YOUR_UBUNTU_IP:9090'
+    restart: unless-stopped
+    networks:
+      - coolify-network
+    labels:
+      - "coolify.managed=true"
+      - "homelab.service=monitoring"
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2.0'
+
+  # Grafana (Ubuntu Desktop - visualization)
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://YOUR_UBUNTU_IP:3000
+      - GF_SECURITY_ALLOW_EMBEDDING=true
+      - GF_FEATURE_TOGGLES_ENABLE=publicDashboards
+      - GF_INSTALL_PLUGINS=grafana-piechart-panel,grafana-worldmap-panel
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+      - ./monitoring/grafana/dashboard-configs:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    networks:
+      - coolify-network
+    labels:
+      - "coolify.managed=true"
+      - "homelab.service=monitoring"
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+
+  # Jaeger (Ubuntu Desktop - distributed tracing)
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - "5775:5775/udp"
+      - "6831:6831/udp"
+      - "6832:6832/udp"
+      - "5778:5778"
+      - "16686:16686"
+      - "14268:14268"
+      - "14250:14250"
+      - "9411:9411"
+      - "4317:4317"  # OTLP gRPC
+      - "4318:4318"  # OTLP HTTP
+    environment:
+      - COLLECTOR_ZIPKIN_HOST_PORT=9411
+      - COLLECTOR_OTLP_ENABLED=true
+      - SPAN_STORAGE_TYPE=elasticsearch
+      - ES_SERVER_URLS=http://elasticsearch:9200
+    restart: unless-stopped
+    networks:
+      - coolify-network
+    labels:
+      - "coolify.managed=true"
+      - "homelab.service=tracing"
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+
+  # HAProxy Load Balancer (Ubuntu Desktop)
+  haproxy:
+    image: haproxy:2.8-alpine
+    ports:
+      - "8080:80"      # Main MCP endpoint
+      - "8404:8404"    # HAProxy stats
+    volumes:
+      - ./config/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    depends_on:
+      - mcp-server-main
+    restart: unless-stopped
+    networks:
+      - coolify-network
+    labels:
+      - "coolify.managed=true"
+      - "homelab.service=loadbalancer"
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+
+  # Node Exporter (Ubuntu Desktop)
+  node-exporter:
+    image: prom/node-exporter:latest
+    ports:
+      - "9100:9100"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.rootfs=/rootfs'
+      - '--path.sysfs=/host/sys'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)'
+    restart: unless-stopped
+    network_mode: host
+    labels:
+      - "coolify.managed=true"
+      - "homelab.service=monitoring"
+
+  # Elasticsearch for Jaeger (optional - for better trace storage)
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    environment:
+      - discovery.type=single-node
+      - "ES_JAVA_OPTS=-Xms2g -Xmx2g"
+      - xpack.security.enabled=false
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"
+    restart: unless-stopped
+    networks:
+      - coolify-network
+    labels:
+      - "coolify.managed=true"
+      - "homelab.service=search"
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: '2.0'
+
+volumes:
+  postgres_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./data/postgres
+  mongo_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./data/mongodb
+  redis_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./data/redis
+  prometheus_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./data/prometheus
+  grafana_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./data/grafana
+  elasticsearch_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ./data/elasticsearch
+
+networks:
+  coolify-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/16
+    labels:
+      - "coolify.managed=true"

@@ -1,12 +1,12 @@
 use crate::error::{Error, Result};
-use crate::tools::{ToolDefinition, ToolAnnotation};
-use serde::{Serialize, Deserialize};
+use crate::tools::{ToolAnnotation, ToolDefinition};
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::sync::Arc;
 use std::path::Path;
+use std::sync::Arc;
 
-pub mod templates;
 pub mod server;
+pub mod templates;
 
 use server::ServerManager;
 
@@ -50,7 +50,7 @@ impl ServerLanguage {
             ServerLanguage::Rust => "rs",
         }
     }
-    
+
     /// Get main file name for language
     pub fn main_file_name(&self) -> &'static str {
         match self {
@@ -60,7 +60,7 @@ impl ServerLanguage {
             ServerLanguage::Rust => "main.rs",
         }
     }
-    
+
     /// Get command for running server
     pub fn command(&self) -> &'static str {
         match self {
@@ -70,14 +70,21 @@ impl ServerLanguage {
             ServerLanguage::Rust => "cargo",
         }
     }
-    
+
     /// Get arguments for running server
     pub fn args(&self, file_path: &Path) -> Vec<String> {
         match self {
-            ServerLanguage::TypeScript => vec!["ts-node".to_string(), file_path.to_string_lossy().to_string()],
+            ServerLanguage::TypeScript => vec![
+                "ts-node".to_string(),
+                file_path.to_string_lossy().to_string(),
+            ],
             ServerLanguage::JavaScript => vec![file_path.to_string_lossy().to_string()],
             ServerLanguage::Python => vec![file_path.to_string_lossy().to_string()],
-            ServerLanguage::Rust => vec!["run".to_string(), "--manifest-path".to_string(), file_path.to_string_lossy().to_string()],
+            ServerLanguage::Rust => vec![
+                "run".to_string(),
+                "--manifest-path".to_string(),
+                file_path.to_string_lossy().to_string(),
+            ],
         }
     }
 }
@@ -92,12 +99,12 @@ impl McpCreatorClient {
     /// Create a new MCP creator client
     pub async fn new() -> Result<Self> {
         let manager = ServerManager::new().await?;
-        
+
         Ok(Self {
             manager: Arc::new(manager),
         })
     }
-    
+
     /// Create a server from a template
     pub async fn create_server_from_template(&self, language: &str) -> Result<String> {
         let language = match language.to_lowercase().as_str() {
@@ -105,13 +112,18 @@ impl McpCreatorClient {
             "javascript" => ServerLanguage::JavaScript,
             "python" => ServerLanguage::Python,
             "rust" => ServerLanguage::Rust,
-            _ => return Err(Error::validation(format!("Unsupported language: {:?}", language))),
+            _ => {
+                return Err(Error::validation(format!(
+                    "Unsupported language: {:?}",
+                    language
+                )))
+            }
         };
-        
+
         let template = self.generate_template(language.clone())?;
         self.manager.create_server(&template, language).await
     }
-    
+
     /// Create a server from custom code
     pub async fn create_server(&self, code: &str, language: &str) -> Result<String> {
         let language = match language.to_lowercase().as_str() {
@@ -119,59 +131,77 @@ impl McpCreatorClient {
             "javascript" => ServerLanguage::JavaScript,
             "python" => ServerLanguage::Python,
             "rust" => ServerLanguage::Rust,
-            _ => return Err(Error::validation(format!("Unsupported language: {:?}", language))),
+            _ => {
+                return Err(Error::validation(format!(
+                    "Unsupported language: {:?}",
+                    language
+                )))
+            }
         };
-        
+
         self.manager.create_server(code, language).await
     }
-    
+
     /// Execute a tool on a server
-    pub async fn execute_tool(&self, server_id: &str, tool_name: &str, args: Value) -> Result<Value> {
+    pub async fn execute_tool(
+        &self,
+        server_id: &str,
+        tool_name: &str,
+        args: Value,
+    ) -> Result<Value> {
         self.manager.execute_tool(server_id, tool_name, args).await
     }
-    
+
     /// Get server tools
     pub async fn get_server_tools(&self, server_id: &str) -> Result<Vec<ToolDefinition>> {
         let client = self.manager.get_server_client(server_id).await?;
         let response = client.call_method("tools/list", None).await?;
-        
-        let tools = response.get("tools")
+
+        let tools = response
+            .get("tools")
             .and_then(|t| t.as_array())
             .ok_or_else(|| Error::protocol("Missing or invalid 'tools' field".to_string()))?;
-            
+
         let mut tool_definitions = Vec::new();
-        
+
         for tool in tools {
             if let Some(name) = tool.get("name").and_then(|n| n.as_str()) {
-                let description = tool.get("description").and_then(|d| d.as_str()).unwrap_or("").to_string();
-                let input_schema = tool.get("inputSchema").cloned().unwrap_or_else(|| json!({}));
-                
-                let tool_def = ToolDefinition::new(name, &description)
-                    .with_parameters(input_schema);
-                
+                let description = tool
+                    .get("description")
+                    .and_then(|d| d.as_str())
+                    .unwrap_or("")
+                    .to_string();
+                let input_schema = tool
+                    .get("inputSchema")
+                    .cloned()
+                    .unwrap_or_else(|| json!({}));
+
+                let tool_def =
+                    ToolDefinition::new(name, &description).with_parameters(input_schema);
+
                 tool_definitions.push(tool_def);
             }
         }
-        
+
         Ok(tool_definitions)
     }
-    
+
     /// Update a server with new code
     pub async fn update_server(&self, server_id: &str, code: &str) -> Result<String> {
         self.manager.update_server(server_id, code).await
     }
-    
+
     /// Delete a server
     pub async fn delete_server(&self, server_id: &str) -> Result<()> {
         self.manager.delete_server(server_id).await
     }
-    
+
     /// List all created MCP servers
     pub async fn list_servers(&self) -> Result<Vec<String>> {
         let servers = self.manager.list_servers().await?;
         Ok(servers.into_iter().map(|s| s.file_path).collect())
     }
-    
+
     /// Get server information by ID
     pub async fn get_server_info(&self, server_id: &str) -> Result<ServerInfo> {
         let _lifecycle = self.manager.get_server_client(server_id).await?;
@@ -183,7 +213,7 @@ impl McpCreatorClient {
             file_path: server_id.to_string(),
         })
     }
-    
+
     /// Get tool definitions for MCP Creation
     pub fn get_tool_definitions(&self) -> Vec<ToolDefinition> {
         vec![
@@ -202,9 +232,14 @@ impl McpCreatorClient {
                     },
                     "required": ["language"]
                 }),
-                Some(ToolAnnotation::new("project_creation").with_description("Create a new MCP server project")
-                    .with_usage_hints(vec!["Use to create a new server project from template".to_string()])
-                    .with_security_notes(vec!["Requires file system access".to_string()]))
+                Some(
+                    ToolAnnotation::new("project_creation")
+                        .with_description("Create a new MCP server project")
+                        .with_usage_hints(vec![
+                            "Use to create a new server project from template".to_string()
+                        ])
+                        .with_security_notes(vec!["Requires file system access".to_string()]),
+                ),
             ),
             ToolDefinition::from_json_schema(
                 "get_server_status",
@@ -220,8 +255,11 @@ impl McpCreatorClient {
                     },
                     "required": ["server_id"]
                 }),
-                Some(ToolAnnotation::new("data_retrieval").with_description("Get the status of a creation server")
-                    .with_usage_hints(vec!["Use to check if a server is running".to_string()]))
+                Some(
+                    ToolAnnotation::new("data_retrieval")
+                        .with_description("Get the status of a creation server")
+                        .with_usage_hints(vec!["Use to check if a server is running".to_string()]),
+                ),
             ),
         ]
     }
@@ -251,7 +289,8 @@ fn main() {
     println!("MCP Rust Server Started");
     // Add your MCP server implementation here
 }
-"#.to_string())
+"#
+        .to_string())
     }
 
     fn generate_python_template(&self) -> Result<String> {
@@ -278,7 +317,8 @@ class MCPServer:
 if __name__ == "__main__":
     server = MCPServer()
     server.run()
-"#.to_string())
+"#
+        .to_string())
     }
 
     fn generate_javascript_template(&self) -> Result<String> {
@@ -306,7 +346,8 @@ class MCPServer {
 
 const server = new MCPServer();
 server.run();
-"#.to_string())
+"#
+        .to_string())
     }
 
     fn generate_typescript_template(&self) -> Result<String> {
@@ -338,6 +379,7 @@ class MCPServer {
 
 const server = new MCPServer();
 server.run();
-"#.to_string())
+"#
+        .to_string())
     }
-} 
+}

@@ -1,19 +1,18 @@
+use crate::config::CicdConfig;
 /// Enhanced CI/CD module with GitOps and IaC support
-/// 
+///
 /// Provides unified access to:
 /// - CI/CD Platforms (GitHub Actions, GitLab CI, Jenkins)
 /// - GitOps Tools (ArgoCD, Flux, Helm)
 /// - Infrastructure as Code (Terraform, Pulumi, CDK)
 /// - Version Control Integration
-
 use crate::error::{Error, Result};
 use crate::lifecycle::LifecycleManager;
 use crate::security::SecurityModule;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use crate::config::CicdConfig;
-use std::sync::Arc;
 use std::collections::HashMap;
+use std::sync::Arc;
 use tokio::process::Command;
 
 /// Enhanced CI/CD configuration
@@ -150,19 +149,19 @@ pub struct CicdModule {
 impl CicdModule {
     /// Create a new enhanced CI/CD module
     pub fn new(config: EnhancedCicdConfig, lifecycle: Arc<LifecycleManager>) -> Self {
-        Self { 
+        Self {
             config,
             lifecycle,
             security: SecurityModule::new(),
         }
     }
-    
+
     /// Create from legacy config for compatibility
     pub fn from_legacy(config: Option<CicdConfig>, lifecycle: Arc<LifecycleManager>) -> Self {
         let legacy_config = config.unwrap_or_else(|| CicdConfig {
             providers: Vec::new(),
         });
-        
+
         Self {
             config: EnhancedCicdConfig {
                 legacy: legacy_config,
@@ -178,368 +177,443 @@ impl CicdModule {
             security: SecurityModule::new(),
         }
     }
-    
+
     /// Check if CI/CD capabilities are available
     pub async fn check_available(&self) -> Result<bool> {
         // Check for available tools
         let mut available = false;
-        
+
         // Check GitHub CLI
         if self.config.github_actions.is_some() {
             if let Ok(output) = Command::new("gh").arg("--version").output().await {
                 available = available || output.status.success();
             }
         }
-        
+
         // Check Terraform
         if self.config.terraform.is_some() {
             if let Ok(output) = Command::new("terraform").arg("--version").output().await {
                 available = available || output.status.success();
             }
         }
-        
+
         // Check Helm
         if self.config.helm.is_some() {
             if let Ok(output) = Command::new("helm").arg("version").output().await {
                 available = available || output.status.success();
             }
         }
-        
+
         // Check ArgoCD CLI
         if self.config.argocd.is_some() {
             if let Ok(output) = Command::new("argocd").arg("version").output().await {
                 available = available || output.status.success();
             }
         }
-        
+
         Ok(available)
     }
-    
+
     // GitHub Actions operations
-    
+
     /// List GitHub Actions workflows
-    pub async fn list_workflows(&self, owner: Option<&str>, repo: Option<&str>) -> Result<Vec<Workflow>> {
-        let gh_config = self.config.github_actions.as_ref()
+    pub async fn list_workflows(
+        &self,
+        owner: Option<&str>,
+        repo: Option<&str>,
+    ) -> Result<Vec<Workflow>> {
+        let gh_config = self
+            .config
+            .github_actions
+            .as_ref()
             .ok_or_else(|| Error::config("GitHub Actions not configured"))?;
-        
+
         let owner = owner.unwrap_or(&gh_config.owner);
         let repo = repo.unwrap_or(&gh_config.repo);
-        
+
         let output = Command::new("gh")
-            .args(&["workflow", "list", "--repo", &format!("{}/{}", owner, repo), "--json", "id,name,state,path"])
+            .args([
+                "workflow",
+                "list",
+                "--repo",
+                &format!("{}/{}", owner, repo),
+                "--json",
+                "id,name,state,path",
+            ])
             .output()
             .await
             .map_err(|e| Error::internal(format!("Failed to list workflows: {}", e)))?;
-        
+
         if !output.status.success() {
-            return Err(Error::service(format!("Failed to list workflows: {}", String::from_utf8_lossy(&output.stderr))));
+            return Err(Error::service(format!(
+                "Failed to list workflows: {}",
+                String::from_utf8_lossy(&output.stderr)
+            )));
         }
-        
+
         let workflows: Vec<Workflow> = serde_json::from_slice(&output.stdout)
             .map_err(|e| Error::parsing(format!("Failed to parse workflows: {}", e)))?;
-        
+
         Ok(workflows)
     }
-    
+
     /// Trigger a workflow
-    pub async fn trigger_workflow(&self, workflow_id: &str, inputs: Option<HashMap<String, String>>) -> Result<()> {
-        let gh_config = self.config.github_actions.as_ref()
+    pub async fn trigger_workflow(
+        &self,
+        workflow_id: &str,
+        inputs: Option<HashMap<String, String>>,
+    ) -> Result<()> {
+        let gh_config = self
+            .config
+            .github_actions
+            .as_ref()
             .ok_or_else(|| Error::config("GitHub Actions not configured"))?;
-        
+
         let repo_str = format!("{}/{}", gh_config.owner, gh_config.repo);
         let mut args = vec!["workflow", "run", workflow_id, "--repo", &repo_str];
-        
+
         let mut input_strings = Vec::new();
         if let Some(inputs) = inputs {
             for (key, value) in inputs {
                 input_strings.push(format!("{}={}", key, value));
             }
         }
-        
+
         for input_str in &input_strings {
             args.push("-f");
             args.push(input_str);
         }
-        
+
         let output = Command::new("gh")
             .args(&args)
             .output()
             .await
             .map_err(|e| Error::internal(format!("Failed to trigger workflow: {}", e)))?;
-        
+
         if !output.status.success() {
-            return Err(Error::service(format!("Failed to trigger workflow: {}", String::from_utf8_lossy(&output.stderr))));
+            return Err(Error::service(format!(
+                "Failed to trigger workflow: {}",
+                String::from_utf8_lossy(&output.stderr)
+            )));
         }
-        
+
         Ok(())
     }
-    
+
     // Terraform operations
-    
+
     /// Initialize Terraform
     pub async fn terraform_init(&self) -> Result<()> {
-        let tf_config = self.config.terraform.as_ref()
+        let tf_config = self
+            .config
+            .terraform
+            .as_ref()
             .ok_or_else(|| Error::config("Terraform not configured"))?;
-        
+
         let output = Command::new("terraform")
             .current_dir(&tf_config.working_dir)
             .arg("init")
             .output()
             .await
             .map_err(|e| Error::internal(format!("Failed to init Terraform: {}", e)))?;
-        
+
         if !output.status.success() {
-            return Err(Error::service(format!("Terraform init failed: {}", String::from_utf8_lossy(&output.stderr))));
+            return Err(Error::service(format!(
+                "Terraform init failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            )));
         }
-        
+
         Ok(())
     }
-    
+
     /// Plan Terraform changes
     pub async fn terraform_plan(&self, out_file: Option<&str>) -> Result<String> {
-        let tf_config = self.config.terraform.as_ref()
+        let tf_config = self
+            .config
+            .terraform
+            .as_ref()
             .ok_or_else(|| Error::config("Terraform not configured"))?;
-        
+
         let mut args = vec!["plan"];
         if let Some(out) = out_file {
             args.push("-out");
             args.push(out);
         }
-        
+
         let output = Command::new("terraform")
             .current_dir(&tf_config.working_dir)
             .args(&args)
             .output()
             .await
             .map_err(|e| Error::internal(format!("Failed to plan Terraform: {}", e)))?;
-        
+
         if !output.status.success() {
-            return Err(Error::service(format!("Terraform plan failed: {}", String::from_utf8_lossy(&output.stderr))));
+            return Err(Error::service(format!(
+                "Terraform plan failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            )));
         }
-        
+
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
-    
+
     /// Apply Terraform changes
     pub async fn terraform_apply(&self, auto_approve: bool) -> Result<String> {
-        let tf_config = self.config.terraform.as_ref()
+        let tf_config = self
+            .config
+            .terraform
+            .as_ref()
             .ok_or_else(|| Error::config("Terraform not configured"))?;
-        
+
         let mut args = vec!["apply"];
         if auto_approve {
             args.push("-auto-approve");
         }
-        
+
         let output = Command::new("terraform")
             .current_dir(&tf_config.working_dir)
             .args(&args)
             .output()
             .await
             .map_err(|e| Error::internal(format!("Failed to apply Terraform: {}", e)))?;
-        
+
         if !output.status.success() {
-            return Err(Error::service(format!("Terraform apply failed: {}", String::from_utf8_lossy(&output.stderr))));
+            return Err(Error::service(format!(
+                "Terraform apply failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            )));
         }
-        
+
         Ok(String::from_utf8_lossy(&output.stdout).to_string())
     }
-    
+
     // Helm operations
-    
+
     /// List Helm releases
     pub async fn helm_list(&self, all_namespaces: bool) -> Result<Vec<HelmRelease>> {
-        let helm_config = self.config.helm.as_ref()
+        let helm_config = self
+            .config
+            .helm
+            .as_ref()
             .ok_or_else(|| Error::config("Helm not configured"))?;
-        
+
         let mut args = vec!["list", "--output", "json"];
-        
+
         if all_namespaces {
             args.push("--all-namespaces");
         } else if let Some(ref ns) = helm_config.namespace {
             args.push("-n");
             args.push(ns);
         }
-        
+
         let output = Command::new("helm")
             .args(&args)
             .output()
             .await
             .map_err(|e| Error::internal(format!("Failed to list Helm releases: {}", e)))?;
-        
+
         if !output.status.success() {
-            return Err(Error::service(format!("Failed to list Helm releases: {}", String::from_utf8_lossy(&output.stderr))));
+            return Err(Error::service(format!(
+                "Failed to list Helm releases: {}",
+                String::from_utf8_lossy(&output.stderr)
+            )));
         }
-        
+
         let releases: Vec<HelmRelease> = serde_json::from_slice(&output.stdout)
             .map_err(|e| Error::parsing(format!("Failed to parse Helm releases: {}", e)))?;
-        
+
         Ok(releases)
     }
-    
+
     /// Install Helm chart
     pub async fn helm_install(
-        &self, 
-        release_name: &str, 
-        chart: &str, 
+        &self,
+        release_name: &str,
+        chart: &str,
         values: Option<HashMap<String, String>>,
-        namespace: Option<&str>
+        namespace: Option<&str>,
     ) -> Result<()> {
-        let helm_config = self.config.helm.as_ref()
+        let helm_config = self
+            .config
+            .helm
+            .as_ref()
             .ok_or_else(|| Error::config("Helm not configured"))?;
-        
+
         let mut args = vec!["install", release_name, chart];
-        
+
         let ns = namespace.or(helm_config.namespace.as_deref());
         if let Some(ns) = ns {
             args.push("-n");
             args.push(ns);
             args.push("--create-namespace");
         }
-        
+
         let mut value_strings = Vec::new();
         if let Some(values) = values {
             for (key, value) in values {
                 value_strings.push(format!("{}={}", key, value));
             }
         }
-        
+
         for value_str in &value_strings {
             args.push("--set");
             args.push(value_str);
         }
-        
+
         let output = Command::new("helm")
             .args(&args)
             .output()
             .await
             .map_err(|e| Error::internal(format!("Failed to install Helm chart: {}", e)))?;
-        
+
         if !output.status.success() {
-            return Err(Error::service(format!("Helm install failed: {}", String::from_utf8_lossy(&output.stderr))));
+            return Err(Error::service(format!(
+                "Helm install failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            )));
         }
-        
+
         Ok(())
     }
-    
+
     /// Upgrade Helm release
     pub async fn helm_upgrade(
         &self,
         release_name: &str,
         chart: &str,
-        values: Option<HashMap<String, String>>
+        values: Option<HashMap<String, String>>,
     ) -> Result<()> {
-        let helm_config = self.config.helm.as_ref()
+        let helm_config = self
+            .config
+            .helm
+            .as_ref()
             .ok_or_else(|| Error::config("Helm not configured"))?;
-        
+
         let mut args = vec!["upgrade", release_name, chart, "--install"];
-        
+
         if let Some(ref ns) = helm_config.namespace {
             args.push("-n");
             args.push(ns);
         }
-        
+
         let mut value_strings = Vec::new();
         if let Some(values) = values {
             for (key, value) in values {
                 value_strings.push(format!("{}={}", key, value));
             }
         }
-        
+
         for value_str in &value_strings {
             args.push("--set");
             args.push(value_str);
         }
-        
+
         let output = Command::new("helm")
             .args(&args)
             .output()
             .await
             .map_err(|e| Error::internal(format!("Failed to upgrade Helm release: {}", e)))?;
-        
+
         if !output.status.success() {
-            return Err(Error::service(format!("Helm upgrade failed: {}", String::from_utf8_lossy(&output.stderr))));
+            return Err(Error::service(format!(
+                "Helm upgrade failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            )));
         }
-        
+
         Ok(())
     }
-    
+
     // ArgoCD operations
-    
+
     /// List ArgoCD applications
     pub async fn argocd_list_apps(&self) -> Result<Vec<ArgoCDApp>> {
-        let argo_config = self.config.argocd.as_ref()
+        let argo_config = self
+            .config
+            .argocd
+            .as_ref()
             .ok_or_else(|| Error::config("ArgoCD not configured"))?;
-        
+
         let mut args = vec!["app", "list", "--output", "json"];
-        
+
         if argo_config.insecure {
             args.push("--insecure");
         }
-        
+
         if argo_config.grpc_web {
             args.push("--grpc-web");
         }
-        
+
         args.push("--server");
         args.push(&argo_config.server);
-        
+
         let output = Command::new("argocd")
             .args(&args)
             .output()
             .await
             .map_err(|e| Error::internal(format!("Failed to list ArgoCD apps: {}", e)))?;
-        
+
         if !output.status.success() {
-            return Err(Error::service(format!("Failed to list ArgoCD apps: {}", String::from_utf8_lossy(&output.stderr))));
+            return Err(Error::service(format!(
+                "Failed to list ArgoCD apps: {}",
+                String::from_utf8_lossy(&output.stderr)
+            )));
         }
-        
+
         let apps: Vec<ArgoCDApp> = serde_json::from_slice(&output.stdout)
             .map_err(|e| Error::parsing(format!("Failed to parse ArgoCD apps: {}", e)))?;
-        
+
         Ok(apps)
     }
-    
+
     /// Sync ArgoCD application
     pub async fn argocd_sync(&self, app_name: &str, prune: bool) -> Result<()> {
-        let argo_config = self.config.argocd.as_ref()
+        let argo_config = self
+            .config
+            .argocd
+            .as_ref()
             .ok_or_else(|| Error::config("ArgoCD not configured"))?;
-        
+
         let mut args = vec!["app", "sync", app_name];
-        
+
         if prune {
             args.push("--prune");
         }
-        
+
         if argo_config.insecure {
             args.push("--insecure");
         }
-        
+
         args.push("--server");
         args.push(&argo_config.server);
-        
+
         let output = Command::new("argocd")
             .args(&args)
             .output()
             .await
             .map_err(|e| Error::internal(format!("Failed to sync ArgoCD app: {}", e)))?;
-        
+
         if !output.status.success() {
-            return Err(Error::service(format!("ArgoCD sync failed: {}", String::from_utf8_lossy(&output.stderr))));
+            return Err(Error::service(format!(
+                "ArgoCD sync failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            )));
         }
-        
+
         Ok(())
     }
-    
+
     /// Get configuration
     pub fn get_config(&self) -> &EnhancedCicdConfig {
         &self.config
     }
-    
+
     /// Get lifecycle manager
     pub fn get_lifecycle(&self) -> &Arc<LifecycleManager> {
         &self.lifecycle
     }
-    
+
     /// Get security module
     pub fn get_security(&self) -> &SecurityModule {
         &self.security
@@ -666,4 +740,3 @@ impl Default for EnhancedCicdConfig {
         }
     }
 }
-

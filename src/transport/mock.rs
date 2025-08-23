@@ -1,18 +1,27 @@
-use crate::transport::{Transport, NotificationHandler};
-use serde_json::{json, Value};
-use std::sync::{Arc, Mutex};
-use std::collections::HashMap;
-use async_trait::async_trait;
 use crate::error::Result;
+use crate::transport::{NotificationHandler, Transport};
+use async_trait::async_trait;
+use serde_json::{json, Value};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+
+// Type alias to reduce complexity
+type RequestLog = Arc<Mutex<Vec<(String, Option<Value>)>>>;
 
 /// Mock transport implementation for testing with performance optimizations
 pub struct MockTransport {
     connected: Arc<Mutex<bool>>,
     request_count: Arc<Mutex<usize>>,
-    requests: Arc<Mutex<Vec<(String, Option<Value>)>>>,
+    requests: RequestLog,
     responses: Arc<Mutex<HashMap<String, Value>>>,
     messages: Arc<Mutex<Vec<Value>>>,
     notification_handlers: Arc<Mutex<Vec<NotificationHandler>>>,
+}
+
+impl Default for MockTransport {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl MockTransport {
@@ -27,14 +36,14 @@ impl MockTransport {
             notification_handlers: Arc::new(Mutex::new(Vec::with_capacity(8))),
         }
     }
-    
+
     /// Set response for a method with efficient mutex handling
     pub fn set_response(&self, method: &str, response: Value) -> Result<()> {
         let mut responses = self.responses.lock().unwrap();
         responses.insert(method.to_string(), response);
         Ok(())
     }
-    
+
     /// Get requests with zero-copy access
     pub fn get_requests(&self) -> Result<Vec<(String, Option<Value>)>> {
         let requests = self.requests.lock().unwrap();
@@ -57,10 +66,10 @@ impl MockTransport {
         let mut messages = self.messages.lock().unwrap();
         if messages.is_empty() {
             Err(crate::error::Error::Transport(
-                crate::error::TransportError::ConnectionFailed { 
+                crate::error::TransportError::ConnectionFailed {
                     message: "No messages available".to_string(),
-                    retry_count: None
-                }
+                    retry_count: None,
+                },
             ))
         } else {
             let message = messages.remove(0);
@@ -69,15 +78,20 @@ impl MockTransport {
     }
 
     /// Batch processing with optimized memory allocation
-    pub async fn batch(&mut self, requests: Vec<serde_json::Value>) -> crate::error::Result<Vec<crate::error::Result<serde_json::Value>>> {
+    pub async fn batch(
+        &mut self,
+        requests: Vec<serde_json::Value>,
+    ) -> crate::error::Result<Vec<crate::error::Result<serde_json::Value>>> {
         let mut results = Vec::with_capacity(requests.len());
-        
+
         for request in requests {
-            let result = self.request("batch_item", Some(request)).await
+            let result = self
+                .request("batch_item", Some(request))
+                .await
                 .map_err(|e| crate::error::Error::Transport(crate::error::TransportError::from(e)));
             results.push(result);
         }
-        
+
         Ok(results)
     }
 }
@@ -102,17 +116,23 @@ impl Transport for MockTransport {
         *connected = true;
         Ok(())
     }
-    
+
     async fn disconnect(&mut self) -> std::result::Result<(), crate::transport::TransportError> {
         let mut connected = self.connected.lock().unwrap();
         *connected = false;
         Ok(())
     }
-    
-    async fn request(&mut self, method: &str, params: Option<Value>) -> std::result::Result<Value, crate::transport::TransportError> {
+
+    async fn request(
+        &mut self,
+        method: &str,
+        params: Option<Value>,
+    ) -> std::result::Result<Value, crate::transport::TransportError> {
         let connected = *self.connected.lock().unwrap();
         if !connected {
-            return Err(crate::transport::TransportError::connection_failed("Transport not connected"));
+            return Err(crate::transport::TransportError::connection_failed(
+                "Transport not connected",
+            ));
         }
 
         // Store request with efficient mutex handling
@@ -133,26 +153,35 @@ impl Transport for MockTransport {
             }))
         }
     }
-    
-    async fn notify(&mut self, method: &str, params: Option<Value>) -> std::result::Result<(), crate::transport::TransportError> {
+
+    async fn notify(
+        &mut self,
+        method: &str,
+        params: Option<Value>,
+    ) -> std::result::Result<(), crate::transport::TransportError> {
         let connected = *self.connected.lock().unwrap();
         if !connected {
-            return Err(crate::transport::TransportError::connection_failed("Transport not connected"));
+            return Err(crate::transport::TransportError::connection_failed(
+                "Transport not connected",
+            ));
         }
-        
+
         // Store notification efficiently
         let mut messages = self.messages.lock().unwrap();
         messages.push(json!({
             "method": method,
             "params": params
         }));
-        
+
         Ok(())
     }
-    
-    async fn add_notification_handler(&mut self, handler: NotificationHandler) -> std::result::Result<(), crate::transport::TransportError> {
+
+    async fn add_notification_handler(
+        &mut self,
+        handler: NotificationHandler,
+    ) -> std::result::Result<(), crate::transport::TransportError> {
         let mut handlers = self.notification_handlers.lock().unwrap();
         handlers.push(handler);
         Ok(())
     }
-} 
+}

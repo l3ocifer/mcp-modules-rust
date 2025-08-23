@@ -1,15 +1,14 @@
 /// High-Performance Rust Implementation of Model Context Protocol (MCP)
-/// 
+///
 /// This crate provides a comprehensive MCP implementation with extensive performance
 /// optimizations including zero-copy operations, efficient memory management,
 /// and async-first design patterns.
-
 // Core modules with performance optimizations
 pub mod client;
 pub mod config;
 pub mod error;
-pub mod transport;
 pub mod lifecycle;
+pub mod transport;
 
 // Authentication and security with zero-copy where possible
 pub mod auth;
@@ -19,38 +18,38 @@ pub mod security;
 pub mod tools;
 
 // Infrastructure and DevOps modules with efficient resource management
-pub mod infrastructure;
-pub mod cloud;
 pub mod cicd;
-pub mod monitoring;
+pub mod cloud;
 pub mod database;
+pub mod infrastructure;
+pub mod monitoring;
 
 // Collaboration and development
 pub mod collaboration;
-pub mod development;
 pub mod creation;
+pub mod development;
 
 // Analytics and AI capabilities
-pub mod analytics;
 pub mod ai;
+pub mod analytics;
 
 // Specialized domain modules
+pub mod finance;
+pub mod gaming;
+pub mod government;
+pub mod maps;
+pub mod memory;
 pub mod office;
 pub mod research;
-pub mod gaming;
 pub mod smart_home;
-pub mod government;
-pub mod memory;
-pub mod finance;
-pub mod maps;
 pub mod web;
 
 // Re-export core types for performance-optimized API
 pub use client::Mcp;
 pub use config::Config;
 pub use error::{Error, Result};
-pub use transport::{Transport, WebSocketTransport, StdioTransport};
 pub use lifecycle::LifecycleManager;
+pub use transport::{StdioTransport, Transport, WebSocketTransport};
 
 // Re-export key functionality
 pub use auth::{AuthManager, Credentials};
@@ -89,7 +88,9 @@ pub async fn from_file_initialized<P: AsRef<std::path::Path>>(path: P) -> Result
 // Transport creation functions with connection pooling and optimization
 
 /// Connect to server with optimized transport selection
-pub async fn connect_to_server(transport: impl transport::Transport + Send + Sync + 'static) -> Result<LifecycleManager> {
+pub async fn connect_to_server(
+    transport: impl transport::Transport + 'static,
+) -> Result<LifecycleManager> {
     let lifecycle = LifecycleManager::new(Box::new(transport));
     Ok(lifecycle)
 }
@@ -111,4 +112,4 @@ pub async fn connect_command(command: &str, args: &[&str]) -> Result<LifecycleMa
     let args_vec = args.iter().map(|s| s.to_string()).collect();
     let transport = StdioTransport::new(command, Some(args_vec)).await?;
     connect_to_server(transport).await
-} 
+}
