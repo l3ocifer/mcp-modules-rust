@@ -1805,7 +1805,9 @@ spec:
         std::fs::write(temp_file.path(), config_str)
             .map_err(|e| Error::io(format!("Failed to write spec to temp file: {}", e)))?;
         
-        let mut args = vec!["apply", "-f", temp_file.path().to_str().unwrap()];
+        let temp_path = temp_file.path().to_str()
+            .ok_or_else(|| Error::io("Invalid temp file path"))?;
+        let mut args = vec!["apply", "-f", temp_path];
         if let Some(ns) = &resource.namespace {
             args.extend_from_slice(&["-n", ns]);
         }

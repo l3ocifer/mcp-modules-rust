@@ -1,6 +1,7 @@
-use devops_mcp::client::MCPClient;
-use devops_mcp::config::{Config, StdioConfig};
+use devops_mcp::{Mcp, Config};
+use devops_mcp::config::TransportConfig;
 use devops_mcp::error::Result;
+use devops_mcp::memory::{MemoryClient, MemoryType, MemorySearchParams};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -14,24 +15,28 @@ async fn main() -> Result<()> {
 
     // Create configuration
     let config = Config {
-        transport_type: "stdio".to_string(),
-        stdio_config: Some(StdioConfig {
-            command: "./target/release/devops-mcp".to_string(),
-            args: vec![],
-            env: std::collections::HashMap::new(),
+        transport: Some(TransportConfig {
+            transport_type: "stdio".to_string(),
+            command: Some("./target/release/devops-mcp".to_string()),
+            args: Some(vec![]),
+            ..Default::default()
         }),
         ..Default::default()
     };
 
     // Create and initialize client
-    let client = MCPClient::new(config);
+    let mut client = Mcp::new(config)?;
     println!("\n📡 Initializing MCP client...");
     client.initialize().await?;
     println!("✅ Client initialized successfully!");
 
+    // Get the lifecycle manager
+    let lifecycle = client.lifecycle()?;
+
     // List available tools
     println!("\n🛠️  Available tools:");
-    let tools = client.list_tools().await?;
+    let tool_manager = client.tools()?;
+    let tools = tool_manager.list_tools();
     for tool in tools.iter().take(10) {
         println!("   - {}: {}", tool.name, tool.description);
     }
@@ -42,72 +47,39 @@ async fn main() -> Result<()> {
     // Test memory module (always available)
     println!("\n🧠 Testing memory module:");
     
+    // Create memory client
+    let memory_client = MemoryClient::new(&lifecycle);
+    
     // Store a memory
-    let memory_id = "example-memory-1";
-    let result = client.call_tool("memory_store", serde_json::json!({
-        "memory": {
-            "id": memory_id,
-            "memory_type": "note",
-            "title": "Example Note",
-            "content": "This is a test note created by the simple client example.",
-            "metadata": {
-                "source": "simple_client.rs",
-                "category": "example"
-            }
-        }
-    })).await?;
-    println!("   ✅ Stored memory: {}", memory_id);
+    let memory_id = memory_client.create_memory(
+        MemoryType::Knowledge,
+        "Example Note",
+        "This is a test note created by the simple client example.",
+        Some([
+            ("source".to_string(), serde_json::json!("simple_client.rs")),
+            ("category".to_string(), serde_json::json!("example"))
+        ].into_iter().collect())
+    ).await?;
+    println!("   ✅ Stored memory with ID: {}", memory_id);
 
     // Retrieve the memory
-    let result = client.call_tool("memory_get", serde_json::json!({
-        "id": memory_id
-    })).await?;
-    if let Some(memory) = result.get("memory") {
-        println!("   ✅ Retrieved memory: {}", memory.get("title").unwrap_or(&serde_json::Value::Null));
-    }
+    let retrieved = memory_client.get_memory(&memory_id).await?;
+    println!("   📖 Retrieved memory: {}", retrieved.title);
+    println!("      Content: {}", retrieved.content);
 
     // Search memories
-    let result = client.call_tool("memory_search", serde_json::json!({
-        "params": {
-            "keyword": "test"
-        }
-    })).await?;
-    if let Some(memories) = result.get("memories").and_then(|v| v.as_array()) {
-        println!("   ✅ Found {} memories matching 'test'", memories.len());
-    }
+    let search_params = MemorySearchParams {
+        keyword: Some("test".to_string()),
+        memory_type: None,
+        metadata_filters: None,
+        limit: Some(10)
+    };
+    let search_results = memory_client.search_memories(search_params).await?;
+    println!("   🔍 Found {} search results", search_results.len());
 
-    // Test infrastructure module if Docker is available
-    if std::process::Command::new("docker").arg("info").output().is_ok() {
-        println!("\n🐳 Testing Docker module:");
-        
-        let result = client.call_tool("docker_list_containers", serde_json::json!({
-            "all": true
-        })).await;
-        
-        match result {
-            Ok(containers) => {
-                if let Some(container_list) = containers.as_array() {
-                    println!("   ✅ Found {} containers", container_list.len());
-                    for (i, container) in container_list.iter().take(3).enumerate() {
-                        if let Some(name) = container.get("name") {
-                            println!("      {}. {}", i + 1, name);
-                        }
-                    }
-                }
-            }
-            Err(e) => {
-                println!("   ⚠️  Docker test failed: {}", e);
-            }
-        }
-    } else {
-        println!("\n⚠️  Docker not available - skipping container tests");
-    }
+    // Test other modules if needed
+    println!("\n🐳 Other modules (Docker, Kubernetes, etc.) would be tested here if configured");
 
-    // Clean up
-    println!("\n🧹 Cleaning up...");
-    client.shutdown().await?;
-    println!("✅ Client shutdown successfully!");
-
-    println!("\n🎉 Example completed successfully!");
+    println!("\n✨ All operations completed successfully!");
     Ok(())
 }

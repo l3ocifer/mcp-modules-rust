@@ -1,44 +1,57 @@
+#[cfg(feature = "database")]
 use crate::database::{Database, DatabaseStatus, QueryResult, Table, Column};
 use crate::error::{Error, Result};
+#[cfg(feature = "database")]
+use serde_json::Value;
+#[cfg(feature = "database")]
 use crate::security::SecurityModule;
+#[cfg(feature = "database")]
 use mongodb::{
     bson::{doc, Document},
     options::{ClientOptions, FindOptions},
     Client, Database as MongoDatabase,
 };
+#[cfg(feature = "database")]
 use futures::TryStreamExt;
-use serde_json::{json, Value};
+#[cfg(feature = "database")]
 use std::time::Instant;
+#[cfg(feature = "database")]
 use tokio::sync::RwLock;
+#[cfg(feature = "database")]
 use std::sync::Arc;
+#[cfg(feature = "database")]
 use std::collections::HashMap;
 
 /// MongoDB provider for database module with connection pooling and performance optimization
+#[cfg(feature = "database")]
 pub struct MongoDBProvider {
     client: Client,
+    #[allow(dead_code)]
     connection_string: String,
     default_database: String,
+    #[allow(dead_code)]
     security: SecurityModule,
     connection_pool: Arc<RwLock<HashMap<String, MongoDatabase>>>,
     max_pool_size: u32,
 }
 
+#[cfg(feature = "database")]
 impl MongoDBProvider {
     /// Create a new MongoDB provider with optimized settings
     pub async fn new(connection_string: String) -> Result<Self> {
         let client_options = ClientOptions::parse(&connection_string)
             .await
-            .map_err(|e| Error::service(&format!("Failed to parse MongoDB connection string: {}", e)))?;
+            .map_err(|e| Error::service(format!("Failed to parse MongoDB connection string: {}", e)))?;
 
         let client = Client::with_options(client_options)
-            .map_err(|e| Error::service(&format!("Failed to create MongoDB client: {}", e)))?;
+            .map_err(|e| Error::service(format!("Failed to create MongoDB client: {}", e)))?;
 
         // Test connection
         client
             .database("admin")
             .run_command(doc! {"ping": 1}, None)
             .await
-            .map_err(|e| Error::service(&format!("Failed to connect to MongoDB: {}", e)))?;
+            .map_err(|e| Error::service(format!("Failed to connect to MongoDB: {}", e)))?;
 
         // Extract default database name from connection string
         let default_database = connection_string
@@ -56,346 +69,286 @@ impl MongoDBProvider {
             default_database,
             security: SecurityModule::new(),
             connection_pool: Arc::new(RwLock::new(HashMap::with_capacity(10))),
-            max_pool_size: 10,
+            max_pool_size: 100,
         })
     }
 
-    /// Get a database with connection pooling
-    async fn get_database(&self, database_name: &str) -> MongoDatabase {
-        let pool = self.connection_pool.read().await;
-        if let Some(db) = pool.get(database_name) {
-            return db.clone();
-        }
-        drop(pool);
-
-        // Create new connection
-        let db = self.client.database(database_name);
+    /// Get or create a database connection from the pool
+    async fn get_database(&self, database_name: Option<&str>) -> MongoDatabase {
+        let db_name = database_name.unwrap_or(&self.default_database);
         
-        let mut pool = self.connection_pool.write().await;
-        if pool.len() < self.max_pool_size as usize {
-            pool.insert(database_name.to_string(), db.clone());
+        // Try to get from pool first
+        {
+            let pool = self.connection_pool.read().await;
+            if let Some(db) = pool.get(db_name) {
+                return db.clone();
+            }
+        }
+        
+        // Create new connection if not in pool
+        let db = self.client.database(db_name);
+        
+        // Add to pool if not at max capacity
+        {
+            let mut pool = self.connection_pool.write().await;
+            if pool.len() < self.max_pool_size as usize {
+                pool.insert(db_name.to_string(), db.clone());
+            }
         }
         
         db
     }
 
-    /// Validate MongoDB query for security
-    fn validate_query(&self, query: &str) -> Result<()> {
-        use crate::security::{SanitizationOptions, ValidationResult};
-        
-        let options = SanitizationOptions {
-            allow_html: false,
-            allow_sql: false,
-            allow_shell_meta: false,
-            max_length: Some(10000),
-        };
+    /// Convert MongoDB document to JSON value
+    fn document_to_value(doc: &Document) -> Result<Value> {
+        let value: Value = mongodb::bson::from_bson(mongodb::bson::Bson::Document(doc.clone()))
+            .map_err(|e| Error::service(format!("Failed to convert BSON to JSON: {}", e)))?;
+        Ok(value)
+    }
 
-        match self.security.validate_input(query, &options) {
-            ValidationResult::Valid => Ok(()),
-            ValidationResult::Invalid(reason) => {
-                Err(Error::validation(&format!("Invalid MongoDB query: {}", reason)))
+    /// Convert JSON value to MongoDB document
+    fn value_to_document(value: &Value) -> Result<Document> {
+        match mongodb::bson::to_bson(value) {
+            Ok(mongodb::bson::Bson::Document(doc)) => Ok(doc),
+            Ok(_) => Err(Error::config("JSON value must be an object")),
+            Err(e) => Err(Error::service(format!("Failed to convert JSON to BSON: {}", e))),
+        }
+    }
+}
+
+#[cfg(feature = "database")]
+#[async_trait::async_trait]
+impl Database for MongoDBProvider {
+    async fn execute_query(&self, query: &str, database: Option<&str>) -> Result<QueryResult> {
+        let start = Instant::now();
+        
+        // Parse the query as a MongoDB command
+        let command: Value = serde_json::from_str(query)
+            .map_err(|e| Error::config(format!("Invalid MongoDB query JSON: {}", e)))?;
+        
+        let db = self.get_database(database).await;
+        
+        // Extract collection name and operation from the command
+        let collection_name = command.get("collection")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| Error::config("Missing 'collection' field in query"))?;
+        
+        let operation = command.get("operation")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| Error::config("Missing 'operation' field in query"))?;
+        
+        let collection = db.collection::<Document>(collection_name);
+        
+        let result = match operation {
+            "find" => {
+                let filter = command.get("filter")
+                    .map(Self::value_to_document)
+                    .transpose()?
+                    .unwrap_or_else(|| doc! {});
+                
+                let options = FindOptions::builder()
+                    .limit(command.get("limit").and_then(|v| v.as_i64()))
+                    .skip(command.get("skip").and_then(|v| v.as_u64()))
+                    .build();
+                
+                let mut cursor = collection.find(filter, options).await
+                    .map_err(|e| Error::service(format!("MongoDB find failed: {}", e)))?;
+                
+                let mut rows = Vec::new();
+                while let Some(doc) = cursor.try_next().await
+                    .map_err(|e| Error::service(format!("Failed to iterate cursor: {}", e)))? {
+                    rows.push(Self::document_to_value(&doc)?);
+                }
+                
+                QueryResult {
+                    rows,
+                    columns: vec![],
+                    rows_affected: 0,
+                    execution_time_ms: start.elapsed().as_millis() as u64,
+                }
             },
-            ValidationResult::Malicious(reason) => {
-                self.security.log_security_event("malicious_mongodb_query", Some(&reason));
-                Err(Error::validation(&format!("Malicious MongoDB query detected: {}", reason)))
-            }
-        }
+            "insert" => {
+                let document = command.get("document")
+                    .ok_or_else(|| Error::config("Missing 'document' field for insert"))?;
+                let doc = Self::value_to_document(document)?;
+                
+                collection.insert_one(doc, None).await
+                    .map_err(|e| Error::service(format!("MongoDB insert failed: {}", e)))?;
+                
+                QueryResult {
+                    rows: vec![],
+                    columns: vec![],
+                    rows_affected: 1,
+                    execution_time_ms: start.elapsed().as_millis() as u64,
+                }
+            },
+            "update" => {
+                let filter = command.get("filter")
+                    .map(Self::value_to_document)
+                    .transpose()?
+                    .unwrap_or_else(|| doc! {});
+                
+                let update = command.get("update")
+                    .ok_or_else(|| Error::config("Missing 'update' field"))?;
+                let update_doc = Self::value_to_document(update)?;
+                
+                let result = collection.update_many(filter, update_doc, None).await
+                    .map_err(|e| Error::service(format!("MongoDB update failed: {}", e)))?;
+                
+                QueryResult {
+                    rows: vec![],
+                    columns: vec![],
+                    rows_affected: result.modified_count as u64,
+                    execution_time_ms: start.elapsed().as_millis() as u64,
+                }
+            },
+            "delete" => {
+                let filter = command.get("filter")
+                    .map(Self::value_to_document)
+                    .transpose()?
+                    .unwrap_or_else(|| doc! {});
+                
+                let result = collection.delete_many(filter, None).await
+                    .map_err(|e| Error::service(format!("MongoDB delete failed: {}", e)))?;
+                
+                QueryResult {
+                    rows: vec![],
+                    columns: vec![],
+                    rows_affected: result.deleted_count as u64,
+                    execution_time_ms: start.elapsed().as_millis() as u64,
+                }
+            },
+            _ => return Err(Error::config(format!("Unknown operation: {}", operation))),
+        };
+        
+        Ok(result)
     }
 
-    /// List databases with performance optimization
-    pub async fn list_databases(&self) -> Result<Vec<Database>> {
-        let start_time = Instant::now();
+    async fn list_databases(&self) -> Result<Vec<String>> {
+        let names = self.client.list_database_names(None, None).await
+            .map_err(|e| Error::service(format!("Failed to list databases: {}", e)))?;
+        Ok(names)
+    }
+
+    async fn list_tables(&self, database: Option<&str>) -> Result<Vec<Table>> {
+        let db = self.get_database(database).await;
+        let collection_names = db.list_collection_names(None).await
+            .map_err(|e| Error::service(format!("Failed to list collections: {}", e)))?;
         
-        let databases = self
-            .client
-            .list_database_names(None, None)
-            .await
-            .map_err(|e| Error::service(&format!("Failed to list databases: {}", e)))?;
-
-        // Pre-allocate with estimated capacity
-        let mut results = Vec::with_capacity(databases.len());
-
-        for db_name in databases {
-            // Skip system databases
-            if &db_name == "admin" || &db_name == "local" || &db_name == "config" {
-                continue;
-            }
-
-            let db = self.get_database(&db_name).await;
+        let mut tables = Vec::new();
+        for name in collection_names {
+            // Get collection stats
+            let stats = db.run_command(doc! {
+                "collStats": &name,
+                "scale": 1
+            }, None).await
+                .map_err(|e| Error::service(format!("Failed to get collection stats: {}", e)))?;
             
-            // Get database stats
-            let stats = match db.run_command(doc! {"dbStats": 1}, None).await {
-                Ok(stats) => stats,
-                Err(_) => doc! {}, // Continue even if stats fail
-            };
-
-            let size = stats.get_i64("dataSize").unwrap_or(0) as u64;
-            let collections = stats.get_i32("collections").unwrap_or(0);
-            let indexes = stats.get_i32("indexes").unwrap_or(0);
-
-            results.push(Database {
-                id: format!("mongodb/{}", db_name),
-                name: db_name,
-                provider: "mongodb".to_string(),
-                status: DatabaseStatus::Online,
-                size: Some(size),
-                metadata: json!({
-                    "collections": collections,
-                    "indexes": indexes,
-                    "engine": "WiredTiger",
-                    "connection_time_ms": start_time.elapsed().as_millis() as u64
-                }),
+            let row_count = stats.get_i64("count").unwrap_or(0) as u64;
+            
+            tables.push(Table {
+                name: name.clone(),
+                columns: vec![], // MongoDB is schemaless
+                row_count: Some(row_count),
+                size_bytes: stats.get_i64("size").ok().map(|s| s as u64),
             });
         }
-
-        Ok(results)
+        
+        Ok(tables)
     }
 
-    /// List collections in a database with optimization
-    pub async fn list_collections(&self, database: &str) -> Result<Vec<String>> {
+    async fn describe_table(&self, table_name: &str, database: Option<&str>) -> Result<Table> {
         let db = self.get_database(database).await;
         
-        let collections = db
-            .list_collection_names(None)
-            .await
-            .map_err(|e| Error::service(&format!("Failed to list collections: {}", e)))?;
-
-        Ok(collections)
-    }
-
-    /// Get collection schema information
-    pub async fn describe_collection(&self, database: &str, collection: &str) -> Result<Table> {
-        let db = self.get_database(database).await;
-        let coll = db.collection::<Document>(collection);
-
         // Get collection stats
-        let _stats = coll
-            .aggregate(vec![
-                doc! {"$collStats": {"storageStats": {}}},
-            ], None)
-            .await
-            .map_err(|e| Error::service(&format!("Failed to get collection stats: {}", e)))?;
-
-        let count = coll.count_documents(None, None).await.unwrap_or(0);
-
+        let stats = db.run_command(doc! {
+            "collStats": table_name,
+            "scale": 1
+        }, None).await
+            .map_err(|e| Error::service(format!("Failed to get collection stats: {}", e)))?;
+        
+        let row_count = stats.get_i64("count").unwrap_or(0) as u64;
+        
         // Sample documents to infer schema
-        let find_options = FindOptions::builder().limit(100).build();
-        let mut cursor = coll
-            .find(None, find_options)
+        let collection = db.collection::<Document>(table_name);
+        let sample_docs: Vec<Document> = collection
+            .find(None, FindOptions::builder().limit(100).build())
             .await
-            .map_err(|e| Error::service(&format!("Failed to sample documents: {}", e)))?;
-
-        let mut field_types = HashMap::new();
-        let mut _doc_count = 0;
-
-        while let Ok(Some(doc)) = cursor.try_next().await {
-            _doc_count += 1;
-            for (key, value) in doc.iter() {
-                let type_name = match value {
-                    mongodb::bson::Bson::Double(_) => "double",
-                    mongodb::bson::Bson::String(_) => "string",
-                    mongodb::bson::Bson::Array(_) => "array",
-                    mongodb::bson::Bson::Document(_) => "object",
-                    mongodb::bson::Bson::Boolean(_) => "boolean",
-                    mongodb::bson::Bson::Int32(_) => "int32",
-                    mongodb::bson::Bson::Int64(_) => "int64",
-                    mongodb::bson::Bson::ObjectId(_) => "objectId",
-                    mongodb::bson::Bson::DateTime(_) => "date",
-                    _ => "mixed",
-                };
-                field_types.insert(key.clone(), type_name.to_string());
+            .map_err(|e| Error::service(format!("Failed to sample collection: {}", e)))?
+            .try_collect()
+            .await
+            .map_err(|e| Error::service(format!("Failed to collect samples: {}", e)))?;
+        
+        // Infer schema from sample documents
+        let mut field_types: HashMap<String, String> = HashMap::new();
+        for doc in &sample_docs {
+            for (key, value) in doc {
+                if !field_types.contains_key(key) {
+                    let data_type = match value {
+                        mongodb::bson::Bson::Double(_) => "double",
+                        mongodb::bson::Bson::String(_) => "string",
+                        mongodb::bson::Bson::Array(_) => "array",
+                        mongodb::bson::Bson::Document(_) => "object",
+                        mongodb::bson::Bson::Boolean(_) => "boolean",
+                        mongodb::bson::Bson::Int32(_) => "int32",
+                        mongodb::bson::Bson::Int64(_) => "int64",
+                        mongodb::bson::Bson::ObjectId(_) => "objectId",
+                        mongodb::bson::Bson::DateTime(_) => "date",
+                        _ => "mixed",
+                    };
+                    field_types.insert(key.clone(), data_type.to_string());
+                }
             }
         }
-
-        // Convert to columns
-        let mut columns = Vec::with_capacity(field_types.len());
-        for (name, data_type) in field_types {
-            columns.push(Column {
-                name: name.clone(),
+        
+        let columns: Vec<Column> = field_types
+            .into_iter()
+            .map(|(name, data_type)| Column {
+                name,
                 data_type,
-                is_nullable: true, // MongoDB fields are generally optional
-                is_primary: name == "_id",
-            });
-        }
-
+                nullable: true, // All fields are nullable in MongoDB
+                primary_key: false,
+                unique: false,
+                default: None,
+            })
+            .collect();
+        
         Ok(Table {
-            name: collection.to_string(),
-            schema: database.to_string(),
-            row_count: count,
-            size: 0, // Would need additional stats call
+            name: table_name.to_string(),
             columns,
+            row_count: Some(row_count),
+            size_bytes: stats.get_i64("size").ok().map(|s| s as u64),
         })
     }
 
-    /// Execute a MongoDB query with security validation and performance optimization
-    pub async fn execute_query(
-        &self,
-        database: &str,
-        collection: &str,
-        query: &str,
-    ) -> Result<QueryResult> {
-        let start_time = Instant::now();
-
-        // Validate query for security
-        self.validate_query(query)?;
-
-        let db = self.get_database(database).await;
-        let coll = db.collection::<Document>(collection);
-
-        // Parse the query as BSON document
-        let query_doc: Document = if query.is_empty() {
-            doc! {}
-        } else {
-            // Try to parse as JSON and convert to BSON
-            let json_value: serde_json::Value = serde_json::from_str(query)
-                .map_err(|e| Error::parsing(&format!("Invalid MongoDB query JSON: {}", e)))?;
-            match mongodb::bson::to_bson(&json_value) {
-                Ok(mongodb::bson::Bson::Document(doc)) => doc,
-                Ok(_) => return Err(Error::parsing("Query must be a JSON object")),
-                Err(e) => return Err(Error::parsing(&format!("Failed to convert query to BSON: {}", e))),
-            }
-        };
-
-        // Execute find query with performance optimization
-        let find_options = FindOptions::builder()
-            .limit(1000) // Prevent excessive results
-            .build();
-
-        let mut cursor = coll
-            .find(Some(query_doc), find_options)
-            .await
-            .map_err(|e| Error::service(&format!("Failed to execute query: {}", e)))?;
-
-        // Pre-allocate results vector
-        let mut rows = Vec::with_capacity(100);
-        let mut columns = Vec::new();
-        let mut first_doc = true;
-
-        while let Ok(Some(doc)) = cursor.try_next().await {
-            if first_doc {
-                // Extract column names from first document
-                columns = doc.keys().map(|k| k.to_string()).collect();
-                first_doc = false;
-            }
-
-            // Convert BSON document to JSON
-            let value: Value = mongodb::bson::from_bson(mongodb::bson::Bson::Document(doc))
-                .map_err(|e| Error::parsing(&format!("Failed to parse BSON: {}", e)))?;
-            rows.push(value);
-        }
-
-        let rows_count = rows.len() as u64;
-        Ok(QueryResult {
-            rows,
-            columns,
-            affected_rows: Some(rows_count),
-            execution_time: Some(start_time.elapsed().as_millis() as u64),
-        })
-    }
-
-    /// Insert document with performance optimization
-    pub async fn insert_document(
-        &self,
-        database: &str,
-        collection: &str,
-        document: Value,
-    ) -> Result<String> {
-        let db = self.get_database(database).await;
-        let coll = db.collection::<Document>(collection);
-
-        // Convert JSON to BSON
-        let bson_doc: Document = match mongodb::bson::to_bson(&document) {
-            Ok(mongodb::bson::Bson::Document(doc)) => doc,
-            Ok(_) => return Err(Error::parsing("Document must be a JSON object")),
-            Err(e) => return Err(Error::parsing(&format!("Failed to convert JSON to BSON: {}", e))),
-        };
-
-        let result = coll
-            .insert_one(bson_doc, None)
-            .await
-            .map_err(|e| Error::service(&format!("Failed to insert document: {}", e)))?;
-
-        Ok(result.inserted_id.to_string())
-    }
-
-    /// Update documents with performance optimization
-    pub async fn update_documents(
-        &self,
-        database: &str,
-        collection: &str,
-        filter: Value,
-        update: Value,
-    ) -> Result<u64> {
-        let db = self.get_database(database).await;
-        let coll = db.collection::<Document>(collection);
-
-        let filter_doc: Document = match mongodb::bson::to_bson(&filter) {
-            Ok(mongodb::bson::Bson::Document(doc)) => doc,
-            Ok(_) => return Err(Error::parsing("Filter must be a JSON object")),
-            Err(e) => return Err(Error::parsing(&format!("Failed to convert filter to BSON: {}", e))),
-        };
-
-        let update_doc: Document = match mongodb::bson::to_bson(&update) {
-            Ok(mongodb::bson::Bson::Document(doc)) => doc,
-            Ok(_) => return Err(Error::parsing("Update must be a JSON object")),
-            Err(e) => return Err(Error::parsing(&format!("Failed to convert update to BSON: {}", e))),
-        };
-
-        let result = coll
-            .update_many(filter_doc, update_doc, None)
-            .await
-            .map_err(|e| Error::service(&format!("Failed to update documents: {}", e)))?;
-
-        Ok(result.modified_count)
-    }
-
-    /// Delete documents with performance optimization
-    pub async fn delete_documents(
-        &self,
-        database: &str,
-        collection: &str,
-        filter: Value,
-    ) -> Result<u64> {
-        let db = self.get_database(database).await;
-        let coll = db.collection::<Document>(collection);
-
-        let filter_doc: Document = match mongodb::bson::to_bson(&filter) {
-            Ok(mongodb::bson::Bson::Document(doc)) => doc,
-            Ok(_) => return Err(Error::parsing("Filter must be a JSON object")),
-            Err(e) => return Err(Error::parsing(&format!("Failed to convert filter to BSON: {}", e))),
-        };
-
-        let result = coll
-            .delete_many(filter_doc, None)
-            .await
-            .map_err(|e| Error::service(&format!("Failed to delete documents: {}", e)))?;
-
-        Ok(result.deleted_count)
-    }
-
-    /// Test connection health
-    pub async fn health_check(&self) -> Result<bool> {
-        match self
-            .client
+    async fn health_check(&self) -> Result<DatabaseStatus> {
+        let start = Instant::now();
+        
+        match self.client
             .database("admin")
             .run_command(doc! {"ping": 1}, None)
-            .await
-        {
-            Ok(_) => Ok(true),
-            Err(e) => {
-                log::warn!("MongoDB health check failed: {}", e);
-                Ok(false)
-            }
+            .await {
+            Ok(_) => Ok(DatabaseStatus {
+                healthy: true,
+                latency_ms: start.elapsed().as_millis() as u64,
+                message: Some("MongoDB connection healthy".to_string()),
+            }),
+            Err(e) => Ok(DatabaseStatus {
+                healthy: false,
+                latency_ms: start.elapsed().as_millis() as u64,
+                message: Some(format!("MongoDB health check failed: {}", e)),
+            }),
         }
     }
+}
 
-    /// Get connection info
-    pub fn connection_info(&self) -> HashMap<String, Value> {
-        let mut info = HashMap::new();
-        info.insert("provider".to_string(), json!("mongodb"));
-        info.insert("connection_string".to_string(), json!(self.connection_string));
-        info.insert("default_database".to_string(), json!(self.default_database));
-        info.insert("max_pool_size".to_string(), json!(self.max_pool_size));
-        info
+// Stub implementation for when database feature is not enabled
+#[cfg(not(feature = "database"))]
+pub struct MongoDBProvider;
+
+#[cfg(not(feature = "database"))]
+impl MongoDBProvider {
+    pub async fn new(_connection_string: String) -> Result<Self> {
+        Err(Error::config("MongoDB support requires 'database' feature to be enabled"))
     }
 }

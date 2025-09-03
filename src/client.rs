@@ -467,7 +467,7 @@ mod tests {
         let config = Config::default();
         let client = new(config).expect("Failed to create client");
 
-        let rt = tokio::runtime::Runtime::new().unwrap();
+        let rt = tokio::runtime::Runtime::new().expect("Failed to create runtime");
         let health = rt
             .block_on(client.health_check(None))
             .expect("Health check failed");

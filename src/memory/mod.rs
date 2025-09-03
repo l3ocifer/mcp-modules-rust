@@ -214,7 +214,7 @@ impl MemoryClient {
         }
         
         let now = Utc::now();
-        if memory.created_at == DateTime::<Utc>::from_timestamp(0, 0).unwrap() {
+        if memory.created_at == DateTime::<Utc>::from_timestamp(0, 0).unwrap_or(now) {
             memory.created_at = now;
         }
         memory.updated_at = now;

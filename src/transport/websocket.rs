@@ -29,7 +29,7 @@ pub struct WebSocketTransport {
 
 impl WebSocketTransport {
     pub fn new(url: String) -> Result<Self> {
-        let quota = Quota::per_second(std::num::NonZeroU32::new(10).unwrap());
+        let quota = Quota::per_second(std::num::NonZeroU32::new(10).expect("Invalid quota value"));
 
         Ok(Self {
             url,

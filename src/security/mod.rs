@@ -22,7 +22,7 @@ pub struct SecurityModule {
 impl SecurityModule {
     /// Create new security module with performance optimizations
     pub fn new() -> Self {
-        let quota = Quota::per_second(std::num::NonZeroU32::new(100).unwrap());
+        let quota = Quota::per_second(std::num::NonZeroU32::new(100).expect("Invalid quota value"));
         let rate_limiter = Arc::new(RateLimiter::direct(quota));
 
         Self {
@@ -43,7 +43,7 @@ impl SecurityModule {
         // Use efficient key derivation with proper salt conversion
         ring::pbkdf2::derive(
             ring::pbkdf2::PBKDF2_HMAC_SHA256,
-            std::num::NonZeroU32::new(100_000).unwrap(),
+            std::num::NonZeroU32::new(100_000).expect("Invalid iteration count"),
             salt.as_str().as_bytes(), // Convert SaltString to bytes via string
             password.as_bytes(),
             &mut key_bytes,
@@ -296,7 +296,7 @@ mod tests {
     fn test_password_hashing() {
         // Test removed - password hashing methods need to be implemented
         // when password functionality is needed
-        assert!(true);
+        // Test is a placeholder - assert removed to avoid clippy warning
     }
 
     #[test]

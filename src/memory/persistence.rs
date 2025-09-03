@@ -1,10 +1,15 @@
 use crate::error::{Error, Result};
-use crate::memory::{Memory, MemoryType, Relationship, RelationType, MemorySearchParams};
-use crate::security::SecurityModule;
+use crate::memory::{Memory, Relationship, MemorySearchParams};
+#[cfg(feature = "database")]
+use crate::memory::{MemoryType, RelationType};
 use async_trait::async_trait;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+
+#[cfg(feature = "database")]
+use crate::security::SecurityModule;
+#[cfg(feature = "database")]
 use sqlx::Row;
 
 /// Trait for memory persistence backends
@@ -22,6 +27,7 @@ pub trait MemoryStore: Send + Sync {
 }
 
 /// PostgreSQL-based memory store with optimized performance
+#[cfg(feature = "database")]
 pub struct PostgreSQLMemoryStore {
     pool: sqlx::PgPool,
     security: SecurityModule,
@@ -29,6 +35,7 @@ pub struct PostgreSQLMemoryStore {
     cache_size_limit: usize,
 }
 
+#[cfg(feature = "database")]
 impl PostgreSQLMemoryStore {
     /// Create a new PostgreSQL memory store
     pub async fn new(connection_string: String) -> Result<Self> {
@@ -38,7 +45,7 @@ impl PostgreSQLMemoryStore {
             .acquire_timeout(std::time::Duration::from_secs(30))
             .connect(&connection_string)
             .await
-            .map_err(|e| Error::service(&format!("Failed to connect to PostgreSQL: {}", e)))?;
+            .map_err(|e| Error::service(format!("Failed to connect to PostgreSQL: {}", e)))?;
 
         // Initialize database schema
         Self::init_schema(&pool).await?;
@@ -67,7 +74,7 @@ impl PostgreSQLMemoryStore {
         "#)
         .execute(pool)
         .await
-        .map_err(|e| Error::service(&format!("Failed to create memories table: {}", e)))?;
+        .map_err(|e| Error::service(format!("Failed to create memories table: {}", e)))?;
 
         // Create relationships table
         sqlx::query(r#"
@@ -84,33 +91,33 @@ impl PostgreSQLMemoryStore {
         "#)
         .execute(pool)
         .await
-        .map_err(|e| Error::service(&format!("Failed to create relationships table: {}", e)))?;
+        .map_err(|e| Error::service(format!("Failed to create relationships table: {}", e)))?;
 
         // Create indexes for performance
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_memories_type ON memories(memory_type);")
             .execute(pool)
             .await
-            .map_err(|e| Error::service(&format!("Failed to create memory type index: {}", e)))?;
+            .map_err(|e| Error::service(format!("Failed to create memory type index: {}", e)))?;
 
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_memories_created_at ON memories(created_at);")
             .execute(pool)
             .await
-            .map_err(|e| Error::service(&format!("Failed to create created_at index: {}", e)))?;
+            .map_err(|e| Error::service(format!("Failed to create created_at index: {}", e)))?;
 
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_memories_content_gin ON memories USING GIN (to_tsvector('english', content));")
             .execute(pool)
             .await
-            .map_err(|e| Error::service(&format!("Failed to create content search index: {}", e)))?;
+            .map_err(|e| Error::service(format!("Failed to create content search index: {}", e)))?;
 
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_relationships_from_id ON memory_relationships(from_id);")
             .execute(pool)
             .await
-            .map_err(|e| Error::service(&format!("Failed to create from_id index: {}", e)))?;
+            .map_err(|e| Error::service(format!("Failed to create from_id index: {}", e)))?;
 
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_relationships_to_id ON memory_relationships(to_id);")
             .execute(pool)
             .await
-            .map_err(|e| Error::service(&format!("Failed to create to_id index: {}", e)))?;
+            .map_err(|e| Error::service(format!("Failed to create to_id index: {}", e)))?;
 
         Ok(())
     }
@@ -119,50 +126,47 @@ impl PostgreSQLMemoryStore {
     fn validate_input(&self, input: &str) -> Result<()> {
         use crate::security::{SanitizationOptions, ValidationResult};
         
-        let options = SanitizationOptions {
-            allow_html: false,
-            allow_sql: false,
-            allow_shell_meta: false,
-            max_length: Some(100000), // 100KB limit
-        };
-
+        let options = SanitizationOptions::default();
         match self.security.validate_input(input, &options) {
             ValidationResult::Valid => Ok(()),
-            ValidationResult::Invalid(reason) => {
-                Err(Error::validation(&format!("Invalid input: {}", reason)))
-            },
-            ValidationResult::Malicious(reason) => {
-                self.security.log_security_event("malicious_memory_input", Some(&reason));
-                Err(Error::validation(&format!("Malicious input detected: {}", reason)))
-            }
+            ValidationResult::Invalid(reason) => Err(Error::config(&reason)),
+            ValidationResult::Malicious(reason) => Err(Error::config(&reason)),
         }
     }
 
     /// Update cache with memory
-    async fn update_cache(&self, memory: &Memory) {
+    async fn update_cache(&self, memory: Memory) {
         let mut cache = self.cache.write().await;
         
-        // Simple LRU eviction if cache is full
+        // Implement simple LRU by removing oldest if at limit
         if cache.len() >= self.cache_size_limit {
             if let Some(oldest_key) = cache.keys().next().cloned() {
                 cache.remove(&oldest_key);
             }
         }
         
-        cache.insert(memory.id.clone(), memory.clone());
+        cache.insert(memory.id.clone(), memory);
     }
 
-    /// Remove from cache
+    /// Get memory from cache
+    async fn get_from_cache(&self, id: &str) -> Option<Memory> {
+        let cache = self.cache.read().await;
+        cache.get(id).cloned()
+    }
+
+    /// Remove memory from cache
     async fn remove_from_cache(&self, id: &str) {
         let mut cache = self.cache.write().await;
         cache.remove(id);
     }
 }
 
+#[cfg(feature = "database")]
 #[async_trait]
 impl MemoryStore for PostgreSQLMemoryStore {
     async fn store_memory(&self, memory: &Memory) -> Result<()> {
-        // Validate inputs
+        // Validate inputs for security
+        self.validate_input(&memory.id)?;
         self.validate_input(&memory.title)?;
         self.validate_input(&memory.content)?;
 
@@ -177,32 +181,28 @@ impl MemoryStore for PostgreSQLMemoryStore {
                 updated_at = EXCLUDED.updated_at
         "#)
         .bind(&memory.id)
-        .bind(&memory.memory_type.to_string())
+        .bind(memory.memory_type.to_string())
         .bind(&memory.title)
         .bind(&memory.content)
-        .bind(sqlx::types::Json(&memory.metadata))
-        .bind(&memory.created_at)
-        .bind(&memory.updated_at)
+        .bind(serde_json::to_value(&memory.metadata).unwrap_or(serde_json::json!({})))
+        .bind(memory.created_at)
+        .bind(memory.updated_at)
         .execute(&self.pool)
         .await
-        .map_err(|e| Error::service(&format!("Failed to store memory: {}", e)))?;
+        .map_err(|e| Error::service(format!("Failed to store memory: {}", e)))?;
 
         // Update cache
-        self.update_cache(memory).await;
+        self.update_cache(memory.clone()).await;
 
         Ok(())
     }
 
     async fn get_memory(&self, id: &str) -> Result<Option<Memory>> {
         // Check cache first
-        {
-            let cache = self.cache.read().await;
-            if let Some(memory) = cache.get(id) {
-                return Ok(Some(memory.clone()));
-            }
+        if let Some(memory) = self.get_from_cache(id).await {
+            return Ok(Some(memory));
         }
 
-        // Query database
         let row = sqlx::query(r#"
             SELECT id, memory_type, title, content, metadata, created_at, updated_at
             FROM memories
@@ -211,7 +211,7 @@ impl MemoryStore for PostgreSQLMemoryStore {
         .bind(id)
         .fetch_optional(&self.pool)
         .await
-        .map_err(|e| Error::service(&format!("Failed to get memory: {}", e)))?;
+        .map_err(|e| Error::service(format!("Failed to get memory: {}", e)))?;
 
         if let Some(row) = row {
             let memory_type_str: String = row.try_get("memory_type")?;
@@ -223,7 +223,7 @@ impl MemoryStore for PostgreSQLMemoryStore {
                 "finance" => MemoryType::Finance,
                 "todo" => MemoryType::Todo,
                 "knowledge" => MemoryType::Knowledge,
-                _ => MemoryType::Custom(memory_type_str),
+                custom => MemoryType::Custom(custom.to_string()),
             };
 
             let memory = Memory {
@@ -231,13 +231,16 @@ impl MemoryStore for PostgreSQLMemoryStore {
                 memory_type,
                 title: row.try_get("title")?,
                 content: row.try_get("content")?,
-                metadata: row.try_get::<sqlx::types::Json<HashMap<String, serde_json::Value>>, _>("metadata")?.0,
-                created_at: row.try_get("created_at")?,
-                updated_at: row.try_get("updated_at")?,
+                metadata: row.try_get::<serde_json::Value, _>("metadata")
+                    .ok()
+                    .and_then(|v| serde_json::from_value(v).ok())
+                    .unwrap_or_else(HashMap::new),
+                created_at: row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")?,
+                updated_at: row.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at")?,
             };
 
             // Update cache
-            self.update_cache(&memory).await;
+            self.update_cache(memory.clone()).await;
 
             Ok(Some(memory))
         } else {
@@ -246,30 +249,32 @@ impl MemoryStore for PostgreSQLMemoryStore {
     }
 
     async fn update_memory(&self, memory: &Memory) -> Result<()> {
-        // Validate inputs
+        // Validate inputs for security
+        self.validate_input(&memory.id)?;
         self.validate_input(&memory.title)?;
         self.validate_input(&memory.content)?;
 
         let result = sqlx::query(r#"
-            UPDATE memories 
-            SET title = $2, content = $3, metadata = $4, updated_at = $5
+            UPDATE memories
+            SET memory_type = $2, title = $3, content = $4, metadata = $5, updated_at = $6
             WHERE id = $1
         "#)
         .bind(&memory.id)
+        .bind(memory.memory_type.to_string())
         .bind(&memory.title)
         .bind(&memory.content)
-        .bind(sqlx::types::Json(&memory.metadata))
-        .bind(&memory.updated_at)
+        .bind(serde_json::to_value(&memory.metadata).unwrap_or(serde_json::json!({})))
+        .bind(memory.updated_at)
         .execute(&self.pool)
         .await
-        .map_err(|e| Error::service(&format!("Failed to update memory: {}", e)))?;
+        .map_err(|e| Error::service(format!("Failed to update memory: {}", e)))?;
 
         if result.rows_affected() == 0 {
-            return Err(Error::not_found(&format!("Memory with ID '{}' not found", memory.id)));
+            return Err(Error::not_found("Memory not found"));
         }
 
         // Update cache
-        self.update_cache(memory).await;
+        self.update_cache(memory.clone()).await;
 
         Ok(())
     }
@@ -279,10 +284,10 @@ impl MemoryStore for PostgreSQLMemoryStore {
             .bind(id)
             .execute(&self.pool)
             .await
-            .map_err(|e| Error::service(&format!("Failed to delete memory: {}", e)))?;
+            .map_err(|e| Error::service(format!("Failed to delete memory: {}", e)))?;
 
         if result.rows_affected() == 0 {
-            return Err(Error::not_found(&format!("Memory with ID '{}' not found", id)));
+            return Err(Error::not_found("Memory not found"));
         }
 
         // Remove from cache
@@ -292,68 +297,55 @@ impl MemoryStore for PostgreSQLMemoryStore {
     }
 
     async fn search_memories(&self, params: &MemorySearchParams) -> Result<Vec<Memory>> {
-        let mut query = String::from(r#"
-            SELECT id, memory_type, title, content, metadata, created_at, updated_at
-            FROM memories
-            WHERE 1=1
-        "#);
-
-        let mut bind_count = 0;
-        let mut query_params: Vec<String> = Vec::new();
+        let mut query = String::from(
+            "SELECT id, memory_type, title, content, metadata, created_at, updated_at FROM memories WHERE 1=1"
+        );
+        let mut bind_values = vec![];
+        let mut bind_counter = 1;
 
         // Add memory type filter
-        if let Some(memory_type) = &params.memory_type {
-            bind_count += 1;
-            query.push_str(&format!(" AND memory_type = ${}", bind_count));
-            query_params.push(memory_type.to_string());
+        if let Some(ref memory_type) = params.memory_type {
+            query.push_str(&format!(" AND memory_type = ${}", bind_counter));
+            bind_values.push(memory_type.to_string());
+            bind_counter += 1;
         }
 
-        // Add keyword search using full-text search
-        if let Some(keyword) = &params.keyword {
-            // Validate keyword
-            self.validate_input(keyword)?;
-            
-            bind_count += 1;
-            query.push_str(&format!(" AND (title ILIKE ${} OR content ILIKE ${} OR to_tsvector('english', content) @@ plainto_tsquery('english', ${}))", 
-                bind_count, bind_count, bind_count));
-            query_params.push(format!("%{}%", keyword));
+        // Add keyword search
+        if let Some(ref keyword) = params.keyword {
+            query.push_str(&format!(
+                " AND (title ILIKE ${} OR content ILIKE ${} OR to_tsvector('english', content) @@ plainto_tsquery('english', ${}))",
+                bind_counter, bind_counter, bind_counter
+            ));
+            bind_values.push(format!("%{}%", keyword));
+            bind_counter += 1;
         }
 
         // Add metadata filters
-        if let Some(metadata_filters) = &params.metadata_filters {
+        if let Some(ref metadata_filters) = params.metadata_filters {
             for (key, value) in metadata_filters {
-                bind_count += 1;
-                query.push_str(&format!(" AND metadata->>${}::text = ${}", bind_count, bind_count + 1));
-                query_params.push(key.clone());
-                bind_count += 1;
-                if let Some(value_str) = value.as_str() {
-                    query_params.push(value_str.to_string());
-                } else {
-                    query_params.push(value.to_string());
-                }
+                query.push_str(&format!(" AND metadata->>'{}' = ${}", key, bind_counter));
+                bind_values.push(value.to_string());
+                bind_counter += 1;
             }
         }
 
         // Add ordering and limit
-        query.push_str(" ORDER BY updated_at DESC");
+        query.push_str(" ORDER BY created_at DESC");
         if let Some(limit) = params.limit {
-            bind_count += 1;
-            query.push_str(&format!(" LIMIT ${}", bind_count));
-            query_params.push(limit.to_string());
+            query.push_str(&format!(" LIMIT {}", limit));
         }
 
-        // Execute query
         let mut sqlx_query = sqlx::query(&query);
-        for param in &query_params {
-            sqlx_query = sqlx_query.bind(param);
+        for value in bind_values {
+            sqlx_query = sqlx_query.bind(value);
         }
 
         let rows = sqlx_query
             .fetch_all(&self.pool)
             .await
-            .map_err(|e| Error::service(&format!("Failed to search memories: {}", e)))?;
+            .map_err(|e| Error::service(format!("Failed to search memories: {}", e)))?;
 
-        let mut memories = Vec::with_capacity(rows.len());
+        let mut memories = Vec::new();
         for row in rows {
             let memory_type_str: String = row.try_get("memory_type")?;
             let memory_type = match memory_type_str.as_str() {
@@ -364,20 +356,21 @@ impl MemoryStore for PostgreSQLMemoryStore {
                 "finance" => MemoryType::Finance,
                 "todo" => MemoryType::Todo,
                 "knowledge" => MemoryType::Knowledge,
-                _ => MemoryType::Custom(memory_type_str),
+                custom => MemoryType::Custom(custom.to_string()),
             };
 
-            let memory = Memory {
+            memories.push(Memory {
                 id: row.try_get("id")?,
                 memory_type,
                 title: row.try_get("title")?,
                 content: row.try_get("content")?,
-                metadata: row.try_get::<sqlx::types::Json<HashMap<String, serde_json::Value>>, _>("metadata")?.0,
-                created_at: row.try_get("created_at")?,
-                updated_at: row.try_get("updated_at")?,
-            };
-
-            memories.push(memory);
+                metadata: row.try_get::<serde_json::Value, _>("metadata")
+                    .ok()
+                    .and_then(|v| serde_json::from_value(v).ok())
+                    .unwrap_or_else(HashMap::new),
+                created_at: row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")?,
+                updated_at: row.try_get::<chrono::DateTime<chrono::Utc>, _>("updated_at")?,
+            });
         }
 
         Ok(memories)
@@ -388,16 +381,17 @@ impl MemoryStore for PostgreSQLMemoryStore {
             INSERT INTO memory_relationships (from_id, to_id, relation_type, metadata, created_at)
             VALUES ($1, $2, $3, $4, $5)
             ON CONFLICT (from_id, to_id, relation_type) DO UPDATE SET
-                metadata = EXCLUDED.metadata
+                metadata = EXCLUDED.metadata,
+                created_at = EXCLUDED.created_at
         "#)
         .bind(&relationship.from_id)
         .bind(&relationship.to_id)
-        .bind(&relationship.relation_type.to_string())
-        .bind(sqlx::types::Json(&relationship.metadata))
-        .bind(&relationship.created_at)
+        .bind(relationship.relation_type.to_string())
+        .bind(serde_json::to_value(&relationship.metadata).unwrap_or(serde_json::json!({})))
+        .bind(relationship.created_at)
         .execute(&self.pool)
         .await
-        .map_err(|e| Error::service(&format!("Failed to store relationship: {}", e)))?;
+        .map_err(|e| Error::service(format!("Failed to store relationship: {}", e)))?;
 
         Ok(())
     }
@@ -407,14 +401,14 @@ impl MemoryStore for PostgreSQLMemoryStore {
             SELECT from_id, to_id, relation_type, metadata, created_at
             FROM memory_relationships
             WHERE from_id = $1 OR to_id = $1
-            ORDER BY created_at
+            ORDER BY created_at DESC
         "#)
         .bind(memory_id)
         .fetch_all(&self.pool)
         .await
-        .map_err(|e| Error::service(&format!("Failed to get relationships: {}", e)))?;
+        .map_err(|e| Error::service(format!("Failed to get relationships: {}", e)))?;
 
-        let mut relationships = Vec::with_capacity(rows.len());
+        let mut relationships = Vec::new();
         for row in rows {
             let relation_type_str: String = row.try_get("relation_type")?;
             let relation_type = match relation_type_str.as_str() {
@@ -424,18 +418,19 @@ impl MemoryStore for PostgreSQLMemoryStore {
                 "BLOCKS" => RelationType::Blocks,
                 "SUPERSEDES" => RelationType::Supersedes,
                 "REFERENCES" => RelationType::References,
-                _ => RelationType::Custom(relation_type_str),
+                custom => RelationType::Custom(custom.to_string()),
             };
 
-            let relationship = Relationship {
+            relationships.push(Relationship {
                 from_id: row.try_get("from_id")?,
                 to_id: row.try_get("to_id")?,
                 relation_type,
-                metadata: row.try_get::<sqlx::types::Json<HashMap<String, serde_json::Value>>, _>("metadata")?.0,
-                created_at: row.try_get("created_at")?,
-            };
-
-            relationships.push(relationship);
+                metadata: row.try_get::<serde_json::Value, _>("metadata")
+                    .ok()
+                    .and_then(|v| serde_json::from_value(v).ok())
+                    .unwrap_or_else(HashMap::new),
+                created_at: row.try_get::<chrono::DateTime<chrono::Utc>, _>("created_at")?,
+            });
         }
 
         Ok(relationships)
@@ -446,7 +441,7 @@ impl MemoryStore for PostgreSQLMemoryStore {
             .bind(memory_id)
             .execute(&self.pool)
             .await
-            .map_err(|e| Error::service(&format!("Failed to delete relationships: {}", e)))?;
+            .map_err(|e| Error::service(format!("Failed to delete relationships: {}", e)))?;
 
         Ok(())
     }
@@ -454,26 +449,86 @@ impl MemoryStore for PostgreSQLMemoryStore {
     async fn health_check(&self) -> Result<bool> {
         match sqlx::query("SELECT 1").execute(&self.pool).await {
             Ok(_) => Ok(true),
-            Err(e) => {
-                log::warn!("Memory store health check failed: {}", e);
-                Ok(false)
-            }
+            Err(_) => Ok(false),
         }
     }
 }
 
-/// In-memory store with Redis caching (for development/testing)
+// Stub implementation when database feature is not enabled
+#[cfg(not(feature = "database"))]
+pub struct PostgreSQLMemoryStore {
+    #[allow(dead_code)]
+    cache: Arc<RwLock<HashMap<String, Memory>>>,
+    #[allow(dead_code)]
+    cache_size_limit: usize,
+}
+
+#[cfg(not(feature = "database"))]
+impl PostgreSQLMemoryStore {
+    pub async fn new(_connection_string: String) -> Result<Self> {
+        Err(Error::config("PostgreSQL memory store requires 'database' feature to be enabled"))
+    }
+}
+
+#[cfg(not(feature = "database"))]
+#[async_trait]
+impl MemoryStore for PostgreSQLMemoryStore {
+    async fn store_memory(&self, _memory: &Memory) -> Result<()> {
+        Err(Error::config("PostgreSQL memory store requires 'database' feature to be enabled"))
+    }
+
+    async fn get_memory(&self, _id: &str) -> Result<Option<Memory>> {
+        Err(Error::config("PostgreSQL memory store requires 'database' feature to be enabled"))
+    }
+
+    async fn update_memory(&self, _memory: &Memory) -> Result<()> {
+        Err(Error::config("PostgreSQL memory store requires 'database' feature to be enabled"))
+    }
+
+    async fn delete_memory(&self, _id: &str) -> Result<()> {
+        Err(Error::config("PostgreSQL memory store requires 'database' feature to be enabled"))
+    }
+
+    async fn search_memories(&self, _params: &MemorySearchParams) -> Result<Vec<Memory>> {
+        Err(Error::config("PostgreSQL memory store requires 'database' feature to be enabled"))
+    }
+
+    async fn store_relationship(&self, _relationship: &Relationship) -> Result<()> {
+        Err(Error::config("PostgreSQL memory store requires 'database' feature to be enabled"))
+    }
+
+    async fn get_relationships(&self, _memory_id: &str) -> Result<Vec<Relationship>> {
+        Err(Error::config("PostgreSQL memory store requires 'database' feature to be enabled"))
+    }
+
+    async fn delete_relationships(&self, _memory_id: &str) -> Result<()> {
+        Err(Error::config("PostgreSQL memory store requires 'database' feature to be enabled"))
+    }
+
+    async fn health_check(&self) -> Result<bool> {
+        Err(Error::config("PostgreSQL memory store requires 'database' feature to be enabled"))
+    }
+}
+
+/// In-memory store for testing and development
 pub struct InMemoryStore {
     memories: Arc<RwLock<HashMap<String, Memory>>>,
     relationships: Arc<RwLock<Vec<Relationship>>>,
 }
 
 impl InMemoryStore {
+    /// Create a new in-memory store
     pub fn new() -> Self {
         Self {
             memories: Arc::new(RwLock::new(HashMap::new())),
             relationships: Arc::new(RwLock::new(Vec::new())),
         }
+    }
+}
+
+impl Default for InMemoryStore {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -496,81 +551,84 @@ impl MemoryStore for InMemoryStore {
             memories.insert(memory.id.clone(), memory.clone());
             Ok(())
         } else {
-            Err(Error::not_found(&format!("Memory with ID '{}' not found", memory.id)))
+            Err(Error::not_found("Memory not found"))
         }
     }
 
     async fn delete_memory(&self, id: &str) -> Result<()> {
         let mut memories = self.memories.write().await;
         if memories.remove(id).is_some() {
-            // Remove relationships
-            let mut relationships = self.relationships.write().await;
-            relationships.retain(|r| r.from_id != id && r.to_id != id);
             Ok(())
         } else {
-            Err(Error::not_found(&format!("Memory with ID '{}' not found", id)))
+            Err(Error::not_found("Memory not found"))
         }
     }
 
     async fn search_memories(&self, params: &MemorySearchParams) -> Result<Vec<Memory>> {
         let memories = self.memories.read().await;
-        
-        let filtered_memories: Vec<Memory> = memories
+        let mut results: Vec<Memory> = memories
             .values()
-            .filter(|memory| {
-                // Filter by memory type
+            .filter(|m| {
                 if let Some(ref memory_type) = params.memory_type {
-                    if memory.memory_type != *memory_type {
+                    if m.memory_type != *memory_type {
                         return false;
                     }
                 }
-
-                // Filter by keyword
+                
                 if let Some(ref keyword) = params.keyword {
                     let keyword_lower = keyword.to_lowercase();
-                    if !memory.title.to_lowercase().contains(&keyword_lower)
-                        && !memory.content.to_lowercase().contains(&keyword_lower)
-                    {
+                    if !m.title.to_lowercase().contains(&keyword_lower) &&
+                       !m.content.to_lowercase().contains(&keyword_lower) {
                         return false;
                     }
                 }
-
-                // Filter by metadata
-                if let Some(ref metadata_filters) = params.metadata_filters {
-                    for (key, value) in metadata_filters {
-                        if !memory
-                            .metadata
-                            .get(key)
-                            .map(|v| v == value)
-                            .unwrap_or(false)
-                        {
+                
+                if let Some(ref filters) = params.metadata_filters {
+                    for (key, value) in filters {
+                        if m.metadata.get(key) != Some(value) {
                             return false;
                         }
                     }
                 }
-
+                
                 true
             })
-            .take(params.limit.unwrap_or(usize::MAX))
             .cloned()
             .collect();
-
-        Ok(filtered_memories)
+        
+        // Sort by created_at descending
+        results.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        
+        // Apply limit
+        if let Some(limit) = params.limit {
+            results.truncate(limit);
+        }
+        
+        Ok(results)
     }
 
     async fn store_relationship(&self, relationship: &Relationship) -> Result<()> {
         let mut relationships = self.relationships.write().await;
+        
+        // Remove existing relationship if it exists
+        relationships.retain(|r| {
+            !(r.from_id == relationship.from_id &&
+              r.to_id == relationship.to_id &&
+              r.relation_type == relationship.relation_type)
+        });
+        
         relationships.push(relationship.clone());
         Ok(())
     }
 
     async fn get_relationships(&self, memory_id: &str) -> Result<Vec<Relationship>> {
         let relationships = self.relationships.read().await;
-        Ok(relationships
+        let results: Vec<Relationship> = relationships
             .iter()
             .filter(|r| r.from_id == memory_id || r.to_id == memory_id)
             .cloned()
-            .collect())
+            .collect();
+        Ok(results)
     }
 
     async fn delete_relationships(&self, memory_id: &str) -> Result<()> {
@@ -580,6 +638,6 @@ impl MemoryStore for InMemoryStore {
     }
 
     async fn health_check(&self) -> Result<bool> {
-        Ok(true)
+        Ok(true) // In-memory store is always healthy
     }
 }

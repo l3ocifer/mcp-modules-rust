@@ -75,7 +75,7 @@ constant_time_eq = "0.4"  # Constant-time comparisons
 # Logging with security considerations
 log = "0.4"
 tracing = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
 
 # Database support with secure defaults
 mongodb = { version = "2.8", optional = true }

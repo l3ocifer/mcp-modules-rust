@@ -39,31 +39,31 @@ impl MockTransport {
 
     /// Set response for a method with efficient mutex handling
     pub fn set_response(&self, method: &str, response: Value) -> Result<()> {
-        let mut responses = self.responses.lock().unwrap();
+        let mut responses = self.responses.lock().map_err(|_| crate::error::Error::service("Failed to acquire lock"))?;
         responses.insert(method.to_string(), response);
         Ok(())
     }
 
     /// Get requests with zero-copy access
     pub fn get_requests(&self) -> Result<Vec<(String, Option<Value>)>> {
-        let requests = self.requests.lock().unwrap();
+        let requests = self.requests.lock().map_err(|_| crate::error::Error::service("Failed to acquire lock"))?;
         Ok(requests.clone())
     }
 
     /// Get messages with optimized collection handling
     pub fn get_messages(&self) -> Result<Vec<Value>> {
-        let messages = self.messages.lock().unwrap();
+        let messages = self.messages.lock().map_err(|_| crate::error::Error::service("Failed to acquire lock"))?;
         Ok(messages.clone())
     }
 
     /// Check connection status efficiently
     pub fn is_connected(&self) -> bool {
-        *self.connected.lock().unwrap()
+        self.connected.lock().map(|guard| *guard).unwrap_or(false)
     }
 
     /// Efficient message handling for testing
     pub async fn receive(&mut self) -> crate::error::Result<Value> {
-        let mut messages = self.messages.lock().unwrap();
+        let mut messages = self.messages.lock().map_err(|_| crate::error::Error::service("Failed to acquire lock"))?;
         if messages.is_empty() {
             Err(crate::error::Error::Transport(
                 crate::error::TransportError::ConnectionFailed {
@@ -98,7 +98,7 @@ impl MockTransport {
 
 impl std::fmt::Debug for MockTransport {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let handlers_count = self.notification_handlers.lock().unwrap().len();
+        let handlers_count = self.notification_handlers.lock().map(|h| h.len()).unwrap_or(0);
         f.debug_struct("MockTransport")
             .field("connected", &self.connected)
             .field("requests", &self.requests)
@@ -112,13 +112,13 @@ impl std::fmt::Debug for MockTransport {
 #[async_trait]
 impl Transport for MockTransport {
     async fn connect(&mut self) -> std::result::Result<(), crate::transport::TransportError> {
-        let mut connected = self.connected.lock().unwrap();
+        let mut connected = self.connected.lock().map_err(|_| crate::transport::TransportError::connection_failed("Failed to acquire lock"))?;
         *connected = true;
         Ok(())
     }
 
     async fn disconnect(&mut self) -> std::result::Result<(), crate::transport::TransportError> {
-        let mut connected = self.connected.lock().unwrap();
+        let mut connected = self.connected.lock().map_err(|_| crate::transport::TransportError::connection_failed("Failed to acquire lock"))?;
         *connected = false;
         Ok(())
     }
@@ -128,7 +128,7 @@ impl Transport for MockTransport {
         method: &str,
         params: Option<Value>,
     ) -> std::result::Result<Value, crate::transport::TransportError> {
-        let connected = *self.connected.lock().unwrap();
+        let connected = self.connected.lock().map(|guard| *guard).unwrap_or(false);
         if !connected {
             return Err(crate::transport::TransportError::connection_failed(
                 "Transport not connected",
@@ -137,12 +137,12 @@ impl Transport for MockTransport {
 
         // Store request with efficient mutex handling
         {
-            let mut requests = self.requests.lock().unwrap();
+            let mut requests = self.requests.lock().map_err(|_| crate::transport::TransportError::connection_failed("Failed to acquire lock"))?;
             requests.push((method.to_string(), params.clone()));
         }
 
         // Return mock response with zero-copy when possible
-        let responses = self.responses.lock().unwrap();
+        let responses = self.responses.lock().map_err(|_| crate::transport::TransportError::connection_failed("Failed to acquire lock"))?;
         if let Some(response) = responses.get(method) {
             Ok(response.clone())
         } else {
@@ -159,7 +159,7 @@ impl Transport for MockTransport {
         method: &str,
         params: Option<Value>,
     ) -> std::result::Result<(), crate::transport::TransportError> {
-        let connected = *self.connected.lock().unwrap();
+        let connected = self.connected.lock().map(|guard| *guard).unwrap_or(false);
         if !connected {
             return Err(crate::transport::TransportError::connection_failed(
                 "Transport not connected",
@@ -167,7 +167,7 @@ impl Transport for MockTransport {
         }
 
         // Store notification efficiently
-        let mut messages = self.messages.lock().unwrap();
+        let mut messages = self.messages.lock().map_err(|_| crate::transport::TransportError::connection_failed("Failed to acquire lock"))?;
         messages.push(json!({
             "method": method,
             "params": params
@@ -180,7 +180,7 @@ impl Transport for MockTransport {
         &mut self,
         handler: NotificationHandler,
     ) -> std::result::Result<(), crate::transport::TransportError> {
-        let mut handlers = self.notification_handlers.lock().unwrap();
+        let mut handlers = self.notification_handlers.lock().map_err(|_| crate::transport::TransportError::connection_failed("Failed to acquire lock"))?;
         handlers.push(handler);
         Ok(())
     }

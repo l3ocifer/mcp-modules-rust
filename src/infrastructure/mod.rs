@@ -277,7 +277,7 @@ impl InfrastructureModule {
                     results.push(result);
                 },
                 _ => {
-                    return Err(Error::validation(&format!("Unsupported provider: {}", resource.provider)));
+                    return Err(Error::validation(format!("Unsupported provider: {}", resource.provider)));
                 }
             }
         }
@@ -313,7 +313,7 @@ impl InfrastructureModule {
                     results.push(result);
                 },
                 _ => {
-                    return Err(Error::validation(&format!("Scaling not supported for provider: {}", target.provider)));
+                    return Err(Error::validation(format!("Scaling not supported for provider: {}", target.provider)));
                 }
             }
         }

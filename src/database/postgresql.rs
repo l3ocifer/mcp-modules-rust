@@ -1,19 +1,27 @@
+#[cfg(feature = "database")]
 use crate::database::{Database, DatabaseStatus, QueryResult, Table, Column};
 use crate::error::{Error, Result};
+#[cfg(feature = "database")]
 use crate::security::SecurityModule;
+#[cfg(feature = "database")]
 use serde_json::{json, Value};
+#[cfg(feature = "database")]
 use sqlx::{postgres::PgPoolOptions, PgPool, Row, Column as SqlxColumn, TypeInfo};
+#[cfg(feature = "database")]
 use std::time::Instant;
-use std::collections::HashMap;
 
 /// PostgreSQL provider for database module with connection pooling and performance optimization
+#[cfg(feature = "database")]
 pub struct PostgreSQLProvider {
     pool: PgPool,
+    #[allow(dead_code)]
     connection_string: String,
     security: SecurityModule,
+    #[allow(dead_code)]
     database_name: String,
 }
 
+#[cfg(feature = "database")]
 impl PostgreSQLProvider {
     /// Create a new PostgreSQL provider with optimized connection pool
     pub async fn new(connection_string: String) -> Result<Self> {
@@ -28,20 +36,17 @@ impl PostgreSQLProvider {
             .to_string();
 
         let pool = PgPoolOptions::new()
-            .max_connections(20)
-            .min_connections(5)
-            .acquire_timeout(std::time::Duration::from_secs(30))
-            .idle_timeout(std::time::Duration::from_secs(600))
-            .max_lifetime(std::time::Duration::from_secs(1800))
+            .max_connections(32)
+            .min_connections(4)
             .connect(&connection_string)
             .await
-            .map_err(|e| Error::service(&format!("Failed to connect to PostgreSQL: {}", e)))?;
+            .map_err(|e| Error::service(format!("Failed to connect to PostgreSQL: {}", e)))?;
 
         // Test connection
         sqlx::query("SELECT 1")
             .execute(&pool)
             .await
-            .map_err(|e| Error::service(&format!("PostgreSQL connection test failed: {}", e)))?;
+            .map_err(|e| Error::service(format!("PostgreSQL connection test failed: {}", e)))?;
 
         Ok(Self {
             pool,
@@ -51,318 +56,312 @@ impl PostgreSQLProvider {
         })
     }
 
-    /// Validate SQL query for security
-    fn validate_query(&self, query: &str) -> Result<()> {
+    /// Convert a SQL row to JSON value
+    fn row_to_value(row: &sqlx::postgres::PgRow) -> Result<Value> {
+        let mut object = serde_json::Map::new();
+        
+        for (i, column) in row.columns().iter().enumerate() {
+            let name = column.name();
+            let value: Value = if let Ok(v) = row.try_get::<Option<i32>, _>(i) {
+                json!(v)
+            } else if let Ok(v) = row.try_get::<Option<i64>, _>(i) {
+                json!(v)
+            } else if let Ok(v) = row.try_get::<Option<f64>, _>(i) {
+                json!(v)
+            } else if let Ok(v) = row.try_get::<Option<String>, _>(i) {
+                json!(v)
+            } else if let Ok(v) = row.try_get::<Option<bool>, _>(i) {
+                json!(v)
+            } else if let Ok(v) = row.try_get::<Option<chrono::NaiveDateTime>, _>(i) {
+                json!(v.map(|dt| dt.to_string()))
+            } else if let Ok(v) = row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>(i) {
+                json!(v.map(|dt| dt.to_rfc3339()))
+            } else if let Ok(v) = row.try_get::<Option<serde_json::Value>, _>(i) {
+                v.unwrap_or(Value::Null)
+            } else {
+                Value::Null
+            };
+            
+            object.insert(name.to_string(), value);
+        }
+        
+        Ok(Value::Object(object))
+    }
+
+    /// Get column information from a row
+    fn get_columns(row: &sqlx::postgres::PgRow) -> Vec<Column> {
+        row.columns()
+            .iter()
+            .map(|col| {
+                Column {
+                    name: col.name().to_string(),
+                    data_type: col.type_info().name().to_string(),
+                    nullable: true, // Would need additional schema query to determine
+                    primary_key: false, // Would need additional schema query to determine
+                    unique: false, // Would need additional schema query to determine
+                    default: None, // Would need additional schema query to determine
+                }
+            })
+            .collect()
+    }
+}
+
+#[cfg(feature = "database")]
+#[async_trait::async_trait]
+impl Database for PostgreSQLProvider {
+    async fn execute_query(&self, query: &str, _database: Option<&str>) -> Result<QueryResult> {
+        let start = Instant::now();
+        
+        // Basic SQL injection prevention (in production, use parameterized queries)
         use crate::security::{SanitizationOptions, ValidationResult};
-        
-        let options = SanitizationOptions {
-            allow_html: false,
-            allow_sql: true, // SQL is expected, but we still validate for injection
-            allow_shell_meta: false,
-            max_length: Some(50000),
-        };
-
-        // Additional SQL injection checks
-        let query_lower = query.to_lowercase();
-        let dangerous_patterns = [
-            "; drop table", "; delete from", "; truncate", 
-            "union select", "or 1=1", "' or '1'='1",
-            "exec xp_", "exec sp_", "xp_cmdshell",
-            "information_schema", "pg_stat_",
-        ];
-
-        for pattern in &dangerous_patterns {
-            if query_lower.contains(pattern) {
-                self.security.log_security_event("sql_injection_attempt", Some(&format!("Pattern detected: {}", pattern)));
-                return Err(Error::validation(&format!("Potentially malicious SQL pattern detected: {}", pattern)));
-            }
+        let options = SanitizationOptions::default();
+        if let ValidationResult::Malicious(reason) = self.security.validate_input(query, &options) {
+            return Err(Error::config(format!("Potentially malicious query: {}", reason)));
         }
-
-        match self.security.validate_input(query, &options) {
-            ValidationResult::Valid => Ok(()),
-            ValidationResult::Invalid(reason) => {
-                Err(Error::validation(&format!("Invalid SQL query: {}", reason)))
-            },
-            ValidationResult::Malicious(reason) => {
-                self.security.log_security_event("malicious_sql_query", Some(&reason));
-                Err(Error::validation(&format!("Malicious SQL query detected: {}", reason)))
-            }
+        
+        // Determine query type
+        let query_lower = query.trim().to_lowercase();
+        
+        if query_lower.starts_with("select") || query_lower.starts_with("with") {
+            // Execute SELECT query
+            let rows: Vec<sqlx::postgres::PgRow> = sqlx::query(query)
+                .fetch_all(&self.pool)
+                .await
+                .map_err(|e| Error::service(format!("Query execution failed: {}", e)))?;
+            
+            let columns = if !rows.is_empty() {
+                Self::get_columns(&rows[0])
+            } else {
+                vec![]
+            };
+            
+            let row_values: Result<Vec<Value>> = rows
+                .iter()
+                .map(Self::row_to_value)
+                .collect();
+            
+            Ok(QueryResult {
+                rows: row_values?,
+                columns,
+                rows_affected: 0,
+                execution_time_ms: start.elapsed().as_millis() as u64,
+            })
+        } else {
+            // Execute DML query (INSERT, UPDATE, DELETE)
+            let result = sqlx::query(query)
+                .execute(&self.pool)
+                .await
+                .map_err(|e| Error::service(format!("Query execution failed: {}", e)))?;
+            
+            Ok(QueryResult {
+                rows: vec![],
+                columns: vec![],
+                rows_affected: result.rows_affected(),
+                execution_time_ms: start.elapsed().as_millis() as u64,
+            })
         }
     }
 
-    /// List databases with performance optimization
-    pub async fn list_databases(&self) -> Result<Vec<Database>> {
-        let start_time = Instant::now();
+    async fn list_databases(&self) -> Result<Vec<String>> {
+        let rows: Vec<(String,)> = sqlx::query_as(
+            "SELECT datname FROM pg_database WHERE datistemplate = false"
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| Error::service(format!("Failed to list databases: {}", e)))?;
         
-        let query = r#"
+        Ok(rows.into_iter().map(|(name,)| name).collect())
+    }
+
+    async fn list_tables(&self, database: Option<&str>) -> Result<Vec<Table>> {
+        let schema = database.unwrap_or("public");
+        
+        let _query = format!(
+            r#"
             SELECT 
-                d.datname as name,
-                pg_database_size(d.datname) as size,
-                (SELECT count(*) FROM information_schema.tables 
-                 WHERE table_catalog = d.datname AND table_schema = 'public') as table_count,
-                (SELECT count(*) FROM pg_stat_user_indexes 
-                 WHERE schemaname = 'public') as index_count
-            FROM pg_database d
-            WHERE d.datistemplate = false
-            AND d.datname NOT IN ('postgres', 'template0', 'template1')
-            ORDER BY d.datname
-        "#;
-
-        let rows = sqlx::query(query)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|e| Error::service(&format!("Failed to list databases: {}", e)))?;
-
-        let mut results = Vec::with_capacity(rows.len());
-
-        for row in rows {
-            let name: String = row.try_get("name")
-                .map_err(|e| Error::service(&format!("Failed to get database name: {}", e)))?;
-            let size: i64 = row.try_get("size")
-                .map_err(|e| Error::service(&format!("Failed to get database size: {}", e)))?;
-            let table_count: i64 = row.try_get("table_count").unwrap_or(0);
-            let index_count: i64 = row.try_get("index_count").unwrap_or(0);
-
-            results.push(Database {
-                id: format!("postgresql/{}", name),
-                name,
-                provider: "postgresql".to_string(),
-                status: DatabaseStatus::Online,
-                size: Some(size as u64),
-                metadata: json!({
-                    "tables": table_count,
-                    "indexes": index_count,
-                    "version": "15.0",
-                    "encoding": "UTF8",
-                    "connection_time_ms": start_time.elapsed().as_millis() as u64
-                }),
-            });
-        }
-
-        Ok(results)
-    }
-
-    /// List tables in a database with optimization
-    pub async fn list_tables(&self, schema: Option<&str>) -> Result<Vec<String>> {
-        let schema = schema.unwrap_or("public");
+                t.table_name,
+                pg_relation_size(quote_ident(t.table_schema)||'.'||quote_ident(t.table_name)) as size_bytes,
+                (SELECT COUNT(*) FROM {}."{}" ) as row_count
+            FROM information_schema.tables t
+            WHERE t.table_schema = '{}'
+                AND t.table_type = 'BASE TABLE'
+            "#,
+            schema, "", schema
+        );
         
-        let query = r#"
-            SELECT table_name 
-            FROM information_schema.tables 
-            WHERE table_schema = $1 
-            AND table_type = 'BASE TABLE'
+        // This is a simplified version - a proper implementation would need dynamic SQL
+        let rows: Vec<(String,)> = sqlx::query_as(
+            r#"
+            SELECT table_name
+            FROM information_schema.tables
+            WHERE table_schema = $1
+                AND table_type = 'BASE TABLE'
             ORDER BY table_name
-        "#;
-
-        let rows = sqlx::query(query)
-            .bind(schema)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|e| Error::service(&format!("Failed to list tables: {}", e)))?;
-
-        let tables = rows
-            .into_iter()
-            .map(|row| row.try_get::<String, _>("table_name"))
-            .collect::<std::result::Result<Vec<_>, _>>()
-            .map_err(|e| Error::service(&format!("Failed to parse table names: {}", e)))?;
-
+            "#
+        )
+        .bind(schema)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| Error::service(format!("Failed to list tables: {}", e)))?;
+        
+        let mut tables = Vec::new();
+        for (table_name,) in rows {
+            // Get table size and row count
+            let stats_query = format!(
+                "SELECT pg_relation_size('{}') as size_bytes, 
+                 (SELECT COUNT(*) FROM {}) as row_count",
+                table_name, table_name
+            );
+            
+            if let Ok(row) = sqlx::query(&stats_query).fetch_one(&self.pool).await {
+                let size_bytes: Option<i64> = row.try_get("size_bytes").ok().flatten();
+                let row_count: Option<i64> = row.try_get("row_count").ok().flatten();
+                
+                tables.push(Table {
+                    name: table_name,
+                    columns: vec![], // Will be populated by describe_table
+                    row_count: row_count.map(|c| c as u64),
+                    size_bytes: size_bytes.map(|s| s as u64),
+                });
+            } else {
+                tables.push(Table {
+                    name: table_name,
+                    columns: vec![],
+                    row_count: None,
+                    size_bytes: None,
+                });
+            }
+        }
+        
         Ok(tables)
     }
 
-    /// Get table schema information
-    pub async fn describe_table(&self, table_name: &str, schema: Option<&str>) -> Result<Table> {
-        let schema = schema.unwrap_or("public");
-
-        // Get table info and column details
-        let query = r#"
+    async fn describe_table(&self, table_name: &str, database: Option<&str>) -> Result<Table> {
+        let schema = database.unwrap_or("public");
+        
+        // Get column information
+        let columns: Vec<(String, String, bool, Option<String>)> = sqlx::query_as(
+            r#"
             SELECT 
-                c.column_name,
-                c.data_type,
-                c.is_nullable,
-                tc.constraint_type
-            FROM information_schema.columns c
-            LEFT JOIN information_schema.key_column_usage kcu 
-                ON c.table_name = kcu.table_name 
-                AND c.column_name = kcu.column_name
-                AND c.table_schema = kcu.table_schema
-            LEFT JOIN information_schema.table_constraints tc 
-                ON kcu.constraint_name = tc.constraint_name
-                AND tc.constraint_type = 'PRIMARY KEY'
-            WHERE c.table_name = $1 
-            AND c.table_schema = $2
-            ORDER BY c.ordinal_position
-        "#;
-
-        let rows = sqlx::query(query)
-            .bind(table_name)
-            .bind(schema)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|e| Error::service(&format!("Failed to describe table: {}", e)))?;
-
-        // Get row count and size
+                column_name,
+                data_type,
+                is_nullable = 'YES' as nullable,
+                column_default
+            FROM information_schema.columns
+            WHERE table_schema = $1 AND table_name = $2
+            ORDER BY ordinal_position
+            "#
+        )
+        .bind(schema)
+        .bind(table_name)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| Error::service(format!("Failed to describe table: {}", e)))?;
+        
+        // Get primary key information
+        let pk_columns: Vec<(String,)> = sqlx::query_as(
+            r#"
+            SELECT kcu.column_name
+            FROM information_schema.table_constraints tc
+            JOIN information_schema.key_column_usage kcu
+                ON tc.constraint_name = kcu.constraint_name
+                AND tc.table_schema = kcu.table_schema
+            WHERE tc.constraint_type = 'PRIMARY KEY'
+                AND tc.table_schema = $1
+                AND tc.table_name = $2
+            "#
+        )
+        .bind(schema)
+        .bind(table_name)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| Error::service(format!("Failed to get primary keys: {}", e)))?;
+        
+        let pk_set: std::collections::HashSet<String> = 
+            pk_columns.into_iter().map(|(name,)| name).collect();
+        
+        // Get unique constraint information
+        let unique_columns: Vec<(String,)> = sqlx::query_as(
+            r#"
+            SELECT kcu.column_name
+            FROM information_schema.table_constraints tc
+            JOIN information_schema.key_column_usage kcu
+                ON tc.constraint_name = kcu.constraint_name
+                AND tc.table_schema = kcu.table_schema
+            WHERE tc.constraint_type = 'UNIQUE'
+                AND tc.table_schema = $1
+                AND tc.table_name = $2
+            "#
+        )
+        .bind(schema)
+        .bind(table_name)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| Error::service(format!("Failed to get unique constraints: {}", e)))?;
+        
+        let unique_set: std::collections::HashSet<String> = 
+            unique_columns.into_iter().map(|(name,)| name).collect();
+        
+        let table_columns: Vec<Column> = columns
+            .into_iter()
+            .map(|(name, data_type, nullable, default)| Column {
+                name: name.clone(),
+                data_type,
+                nullable,
+                primary_key: pk_set.contains(&name),
+                unique: unique_set.contains(&name),
+                default,
+            })
+            .collect();
+        
+        // Get table size and row count
         let stats_query = format!(
-            "SELECT count(*) as row_count FROM {}.{}",
-            schema, table_name
+            "SELECT pg_relation_size('{}') as size_bytes, 
+             (SELECT COUNT(*) FROM {}) as row_count",
+            table_name, table_name
         );
         
-        let row_count: i64 = sqlx::query_scalar(&stats_query)
-            .fetch_one(&self.pool)
-            .await
-            .unwrap_or(0);
-
-        let mut columns = Vec::with_capacity(rows.len());
-        for row in rows {
-            let column_name: String = row.try_get("column_name")?;
-            let data_type: String = row.try_get("data_type")?;
-            let is_nullable: String = row.try_get("is_nullable")?;
-            let constraint_type: Option<String> = row.try_get("constraint_type").ok();
-
-            columns.push(Column {
-                name: column_name,
-                data_type,
-                is_nullable: is_nullable == "YES",
-                is_primary: constraint_type.as_deref() == Some("PRIMARY KEY"),
-            });
-        }
-
+        let (size_bytes, row_count) = if let Ok(row) = sqlx::query(&stats_query).fetch_one(&self.pool).await {
+            let size_bytes: Option<i64> = row.try_get("size_bytes").ok().flatten();
+            let row_count: Option<i64> = row.try_get("row_count").ok().flatten();
+            (size_bytes.map(|s| s as u64), row_count.map(|c| c as u64))
+        } else {
+            (None, None)
+        };
+        
         Ok(Table {
             name: table_name.to_string(),
-            schema: schema.to_string(),
-            row_count: row_count as u64,
-            size: 0, // Would need additional query to get table size
-            columns,
+            columns: table_columns,
+            row_count,
+            size_bytes,
         })
     }
 
-    /// Execute a SQL query with security validation and performance optimization
-    pub async fn execute_query(&self, query: &str) -> Result<QueryResult> {
-        let start_time = Instant::now();
-
-        // Validate query for security
-        self.validate_query(query)?;
-
-        // Determine if it's a SELECT query or modification query
-        let is_select = query.trim().to_lowercase().starts_with("select");
-
-        if is_select {
-            self.execute_select_query(query, start_time).await
-        } else {
-            self.execute_modification_query(query, start_time).await
-        }
-    }
-
-    /// Execute SELECT query
-    async fn execute_select_query(&self, query: &str, start_time: Instant) -> Result<QueryResult> {
-        let rows = sqlx::query(query)
-            .fetch_all(&self.pool)
-            .await
-            .map_err(|e| Error::service(&format!("Failed to execute SELECT query: {}", e)))?;
-
-        if rows.is_empty() {
-            return Ok(QueryResult {
-                rows: vec![],
-                columns: vec![],
-                affected_rows: Some(0),
-                execution_time: Some(start_time.elapsed().as_millis() as u64),
-            });
-        }
-
-        // Get column names from the first row
-        let columns: Vec<String> = rows[0]
-            .columns()
-            .iter()
-            .map(|col| col.name().to_string())
-            .collect();
-
-        // Convert rows to JSON values
-        let mut json_rows = Vec::with_capacity(rows.len());
-        for row in rows {
-            let mut json_row = serde_json::Map::new();
-            
-            for (i, column) in row.columns().iter().enumerate() {
-                let value = match column.type_info().name() {
-                    "INT4" => {
-                        row.try_get::<Option<i32>, _>(i)
-                            .map(|v| v.map(|n| json!(n)).unwrap_or(Value::Null))
-                    },
-                    "INT8" => {
-                        row.try_get::<Option<i64>, _>(i)
-                            .map(|v| v.map(|n| json!(n)).unwrap_or(Value::Null))
-                    },
-                    "TEXT" | "VARCHAR" => {
-                        row.try_get::<Option<String>, _>(i)
-                            .map(|v| v.map(|s| json!(s)).unwrap_or(Value::Null))
-                    },
-                    "BOOL" => {
-                        row.try_get::<Option<bool>, _>(i)
-                            .map(|v| v.map(|b| json!(b)).unwrap_or(Value::Null))
-                    },
-                    "TIMESTAMPTZ" | "TIMESTAMP" => {
-                        row.try_get::<Option<chrono::DateTime<chrono::Utc>>, _>(i)
-                            .map(|v| v.map(|dt| json!(dt.to_rfc3339())).unwrap_or(Value::Null))
-                    },
-                    _ => {
-                        // Generic string conversion for unknown types
-                        row.try_get::<Option<String>, _>(i)
-                            .map(|v| v.map(|s| json!(s)).unwrap_or(Value::Null))
-                    }
-                }.unwrap_or(Value::Null);
-
-                json_row.insert(column.name().to_string(), value);
-            }
-            
-            json_rows.push(Value::Object(json_row));
-        }
-
-        let rows_count = json_rows.len() as u64;
-        Ok(QueryResult {
-            rows: json_rows,
-            columns,
-            affected_rows: Some(rows_count),
-            execution_time: Some(start_time.elapsed().as_millis() as u64),
-        })
-    }
-
-    /// Execute modification query (INSERT, UPDATE, DELETE)
-    async fn execute_modification_query(&self, query: &str, start_time: Instant) -> Result<QueryResult> {
-        let result = sqlx::query(query)
-            .execute(&self.pool)
-            .await
-            .map_err(|e| Error::service(&format!("Failed to execute query: {}", e)))?;
-
-        Ok(QueryResult {
-            rows: vec![],
-            columns: vec![],
-            affected_rows: Some(result.rows_affected()),
-            execution_time: Some(start_time.elapsed().as_millis() as u64),
-        })
-    }
-
-    /// Test connection health
-    pub async fn health_check(&self) -> Result<bool> {
+    async fn health_check(&self) -> Result<DatabaseStatus> {
+        let start = Instant::now();
+        
         match sqlx::query("SELECT 1").execute(&self.pool).await {
-            Ok(_) => Ok(true),
-            Err(e) => {
-                log::warn!("PostgreSQL health check failed: {}", e);
-                Ok(false)
-            }
+            Ok(_) => Ok(DatabaseStatus {
+                healthy: true,
+                latency_ms: start.elapsed().as_millis() as u64,
+                message: Some("PostgreSQL connection healthy".to_string()),
+            }),
+            Err(e) => Ok(DatabaseStatus {
+                healthy: false,
+                latency_ms: start.elapsed().as_millis() as u64,
+                message: Some(format!("PostgreSQL health check failed: {}", e)),
+            }),
         }
     }
+}
 
-    /// Get connection pool statistics
-    pub fn get_pool_stats(&self) -> HashMap<String, Value> {
-        let mut stats = HashMap::new();
-        stats.insert("provider".to_string(), json!("postgresql"));
-        stats.insert("database_name".to_string(), json!(self.database_name));
-        stats.insert("connection_string".to_string(), json!(self.connection_string));
-        stats.insert("pool_size".to_string(), json!(self.pool.size()));
-        stats.insert("pool_idle".to_string(), json!(self.pool.num_idle()));
-        stats
-    }
+// Stub implementation for when database feature is not enabled
+#[cfg(not(feature = "database"))]
+pub struct PostgreSQLProvider;
 
-    /// Close the connection pool
-    pub async fn close(&self) {
-        self.pool.close().await;
+#[cfg(not(feature = "database"))]
+impl PostgreSQLProvider {
+    pub async fn new(_connection_string: String) -> Result<Self> {
+        Err(Error::config("PostgreSQL support requires 'database' feature to be enabled"))
     }
 }

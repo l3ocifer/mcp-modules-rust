@@ -5,20 +5,23 @@
 /// 2. Perform health checks
 /// 3. Use basic functionality from core modules
 
-use devops_mcp::{new, Config, Error};
-use devops_mcp::memory::{MemoryClient, Memory, MemoryType};
+use devops_mcp::{Mcp, Config};
+use devops_mcp::memory::{MemoryClient, MemoryType};
 use devops_mcp::security::{SecurityModule, SanitizationOptions, ValidationResult};
+use std::collections::HashMap;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize logging
-    env_logger::init();
+    tracing_subscriber::fmt()
+        .with_env_filter("devops_mcp=debug")
+        .init();
     
     println!("🚀 MCP Modules Rust - Basic Usage Example");
     
     // Create a client with default configuration
     let config = Config::default();
-    let client = new(config)?;
+    let mut client = Mcp::new(config)?;
     
     println!("✅ Client created successfully");
     
@@ -32,16 +35,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     
-    // Perform a health check
-    match client.health_check(None).await {
-        Ok(health) => {
-            println!("✅ Health check completed: {:?}", health.overall);
-        },
-        Err(e) => {
-            println!("⚠️  Health check failed (expected): {}", e);
-            println!("   This is normal if no MCP server is running");
+    // Get lifecycle for modules that need it
+    let lifecycle = match client.lifecycle() {
+        Ok(lc) => Some(lc),
+        Err(_) => {
+            println!("⚠️  Lifecycle not available - some features may be limited");
+            None
         }
-    }
+    };
     
     // Example 1: Security Module - Input Validation
     println!("\n🔒 Security Module Example");
@@ -70,135 +71,82 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     
-    // Example 2: Memory Module - Knowledge Management
-    println!("\n🧠 Memory Module Example");
-    
-    let memory_client = MemoryClient::new(client.lifecycle());
-    
-    // Create some example memories
-    let memories = vec![
-        Memory {
-            content: "Rust provides memory safety without garbage collection".to_string(),
-            memory_type: MemoryType::Fact,
-            metadata: serde_json::json!({
-                "category": "programming",
-                "language": "rust",
-                "importance": 9
+    // Example 2: Memory Module - Knowledge Management (if lifecycle available)
+    if let Some(ref lifecycle) = lifecycle {
+        println!("\n🧠 Memory Module Example");
+        
+        let memory_client = MemoryClient::new(lifecycle);
+        
+        // Create some example memories
+        let memories = vec![
+            ("Rust provides memory safety without garbage collection", MemoryType::Knowledge, {
+                let mut metadata = HashMap::new();
+                metadata.insert("category".to_string(), serde_json::json!("programming"));
+                metadata.insert("language".to_string(), serde_json::json!("rust"));
+                metadata.insert("importance".to_string(), serde_json::json!(9));
+                metadata
             }),
-            ..Default::default()
-        },
-        Memory {
-            content: "Decision: Use actix-web for HTTP server implementation".to_string(),
-            memory_type: MemoryType::Decision,
-            metadata: serde_json::json!({
-                "project": "mcp-modules",
-                "date": "2024-01-15",
-                "reasoning": "Performance and ecosystem"
+            ("Decision: Use actix-web for HTTP server implementation", MemoryType::Project, {
+                let mut metadata = HashMap::new();
+                metadata.insert("project".to_string(), serde_json::json!("mcp-modules"));
+                metadata.insert("date".to_string(), serde_json::json!("2024-01-15"));
+                metadata.insert("reasoning".to_string(), serde_json::json!("Performance and ecosystem"));
+                metadata
             }),
-            ..Default::default()
-        },
-        Memory {
-            content: "Always validate user input to prevent security vulnerabilities".to_string(),
-            memory_type: MemoryType::Insight,
-            metadata: serde_json::json!({
-                "category": "security",
-                "importance": 10
+            ("MCP protocol version 2025-06-18 is supported", MemoryType::System, {
+                let mut metadata = HashMap::new();
+                metadata.insert("protocol".to_string(), serde_json::json!("MCP"));
+                metadata.insert("version".to_string(), serde_json::json!("2025-06-18"));
+                metadata
             }),
-            ..Default::default()
-        },
-    ];
-    
-    // Store memories
-    let mut memory_ids = Vec::new();
-    for memory in memories {
-        match memory_client.create_memory(memory.clone()).await {
-            Ok(id) => {
-                println!("✅ Created memory: '{}' (ID: {})", 
-                    memory.content.chars().take(50).collect::<String>(), id);
-                memory_ids.push(id);
-            },
-            Err(e) => {
-                println!("⚠️  Failed to create memory: {}", e);
+        ];
+        
+        // Store memories
+        for (content, memory_type, metadata) in memories {
+            match memory_client.create_memory(
+                memory_type.clone(),
+                format!("{:?} Memory", memory_type),
+                content,
+                Some(metadata)
+            ).await {
+                Ok(id) => println!("✅ Created memory: {}", id),
+                Err(e) => println!("⚠️  Failed to create memory: {}", e),
             }
         }
-    }
-    
-    // Search memories
-    if !memory_ids.is_empty() {
+        
+        // Search memories
         let search_params = devops_mcp::memory::MemorySearchParams {
             keyword: Some("rust".to_string()),
-            limit: Some(10),
-            ..Default::default()
+            memory_type: None,
+            metadata_filters: None,
+            limit: Some(5),
         };
         
         match memory_client.search_memories(search_params).await {
             Ok(results) => {
-                println!("🔍 Found {} memories containing 'rust':", results.len());
-                for memory in results {
-                    println!("   - {}", memory.content.chars().take(60).collect::<String>());
+                println!("\n🔍 Search results for 'rust':");
+                for memory in results.iter() {
+                    println!("   - {}: {}", memory.title, &memory.content[..50.min(memory.content.len())]);
                 }
             },
-            Err(e) => {
-                println!("⚠️  Memory search failed: {}", e);
-            }
+            Err(e) => println!("⚠️  Search failed: {}", e),
         }
     }
     
-    // Example 3: Error Handling Demonstration
-    println!("\n⚠️  Error Handling Example");
+    // Example 3: Tools Module
+    println!("\n🛠️  Tools Module Example");
     
-    // Demonstrate different error types
-    let errors = vec![
-        Error::network("Connection timeout"),
-        Error::auth("Invalid API key"),
-        Error::validation("Missing required field"),
-        Error::internal("Unexpected server error"),
-    ];
-    
-    for error in errors {
-        println!("Error category '{}': {} (recoverable: {})", 
-            error.category(), error, error.is_recoverable());
+    match client.tools() {
+        Ok(tool_manager) => {
+            let tools = tool_manager.list_tools();
+            println!("Available tools: {} tools registered", tools.len());
+            for tool in tools.iter().take(5) {
+                println!("   - {}: {}", tool.name, tool.description);
+            }
+        },
+        Err(e) => println!("⚠️  Failed to get tools: {}", e),
     }
     
-    // Example 4: Configuration Demonstration
-    println!("\n⚙️  Configuration Example");
-    
-    // Show different ways to configure the client
-    let mut custom_config = Config::new();
-    
-    // Configure transport (this would normally connect to a real server)
-    custom_config.transport = Some(devops_mcp::config::TransportConfig {
-        transport_type: "http".to_string(),
-        url: Some("http://localhost:8080".to_string()),
-        ..Default::default()
-    });
-    
-    // Configure security
-    custom_config.security = Some(devops_mcp::config::SecurityConfig {
-        rate_limit: Some(100),
-        input_validation: true,
-        ..Default::default()
-    });
-    
-    println!("✅ Custom configuration created:");
-    println!("   Transport: HTTP to localhost:8080");
-    println!("   Security: Rate limit 100/min, validation enabled");
-    
-    // Example 5: Tool Discovery
-    println!("\n🔧 Tool Discovery Example");
-    
-    let tools = memory_client.get_tools();
-    println!("Memory module provides {} tools:", tools.len());
-    for (name, tool) in tools {
-        println!("   - {}: {}", name, tool.description);
-    }
-    
-    println!("\n🎉 Basic usage example completed!");
-    println!("📚 Check out other examples for specific modules:");
-    println!("   - office_automation.rs");
-    println!("   - smart_home_control.rs");
-    println!("   - financial_trading.rs");
-    println!("   - infrastructure_management.rs");
-    
+    println!("\n✨ Basic usage example completed!");
     Ok(())
 }

@@ -1,4 +1,4 @@
-use crate::database::{Column, Database, DatabaseStatus, QueryResult, Table};
+use crate::database::{Column, DatabaseInfo, DatabaseStatusEnum, QueryResult, Table};
 use crate::error::Result;
 use serde_json::json;
 
@@ -23,14 +23,14 @@ impl SupabaseProvider {
     }
 
     /// List databases
-    pub async fn list_databases(&self) -> Result<Vec<Database>> {
+    pub async fn list_databases(&self) -> Result<Vec<DatabaseInfo>> {
         // This is a placeholder implementation
         // Supabase typically has a single database per project
-        Ok(vec![Database {
+        Ok(vec![DatabaseInfo {
             id: "supabase/default".to_string(),
             name: "default".to_string(),
             provider: "supabase".to_string(),
-            status: DatabaseStatus::Online,
+            status: DatabaseStatusEnum::Online,
             size: Some(1024 * 1024 * 100), // 100 MB
             metadata: json!({
                 "tables": 10,
@@ -47,33 +47,40 @@ impl SupabaseProvider {
         // This is a placeholder implementation
         Ok(vec![Table {
             name: "profiles".to_string(),
-            schema: "public".to_string(),
-            row_count: 5000,
-            size: 1024 * 1024 * 20, // 20 MB
+            row_count: Some(5000),
+            size_bytes: Some(1024 * 1024 * 20), // 20 MB
             columns: vec![
                 Column {
                     name: "id".to_string(),
                     data_type: "uuid".to_string(),
-                    is_nullable: false,
-                    is_primary: true,
+                    nullable: false,
+                    primary_key: true,
+                    unique: true,
+                    default: None,
                 },
                 Column {
                     name: "username".to_string(),
                     data_type: "varchar(255)".to_string(),
-                    is_nullable: false,
-                    is_primary: false,
+                    nullable: false,
+                    primary_key: false,
+                    unique: false,
+                    default: None,
                 },
                 Column {
                     name: "avatar_url".to_string(),
                     data_type: "text".to_string(),
-                    is_nullable: true,
-                    is_primary: false,
+                    nullable: true,
+                    primary_key: false,
+                    unique: false,
+                    default: None,
                 },
                 Column {
                     name: "created_at".to_string(),
                     data_type: "timestamp with time zone".to_string(),
-                    is_nullable: false,
-                    is_primary: false,
+                    nullable: false,
+                    primary_key: false,
+                    unique: false,
+                    default: None,
                 },
             ],
         }])
@@ -90,13 +97,41 @@ impl SupabaseProvider {
                 "created_at": "2023-09-23T12:34:56Z"
             })],
             columns: vec![
-                "id".to_string(),
-                "username".to_string(),
-                "avatar_url".to_string(),
-                "created_at".to_string(),
+                Column {
+                    name: "id".to_string(),
+                    data_type: "uuid".to_string(),
+                    nullable: false,
+                    primary_key: true,
+                    unique: true,
+                    default: None,
+                },
+                Column {
+                    name: "username".to_string(),
+                    data_type: "varchar".to_string(),
+                    nullable: false,
+                    primary_key: false,
+                    unique: false,
+                    default: None,
+                },
+                Column {
+                    name: "avatar_url".to_string(),
+                    data_type: "text".to_string(),
+                    nullable: true,
+                    primary_key: false,
+                    unique: false,
+                    default: None,
+                },
+                Column {
+                    name: "created_at".to_string(),
+                    data_type: "timestamp".to_string(),
+                    nullable: false,
+                    primary_key: false,
+                    unique: false,
+                    default: Some("now()".to_string()),
+                },
             ],
-            affected_rows: Some(1),
-            execution_time: Some(12), // 12 milliseconds
+            rows_affected: 1,
+            execution_time_ms: 12 // 12 milliseconds
         })
     }
 }

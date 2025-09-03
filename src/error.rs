@@ -1164,7 +1164,7 @@ mod tests {
             utils::retry_with_backoff(operation, 5, std::time::Duration::from_millis(10)).await;
 
         assert!(result.is_ok());
-        assert_eq!(result.unwrap(), "Success");
+        assert_eq!(result.expect("Expected success"), "Success");
         assert_eq!(attempt_count.load(std::sync::atomic::Ordering::SeqCst), 3);
     }
 }

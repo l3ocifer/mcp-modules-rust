@@ -306,11 +306,11 @@ impl MonitoringModule {
         // Add authentication
         if let Some(token) = &prom_config.bearer_token {
             headers.insert(AUTHORIZATION, HeaderValue::from_str(&format!("Bearer {}", token))
-                .map_err(|e| Error::config(&format!("Invalid bearer token: {}", e)))?);
+                .map_err(|e| Error::config(format!("Invalid bearer token: {}", e)))?);
         } else if let (Some(username), Some(password)) = (&prom_config.username, &prom_config.password) {
             let credentials = base64::engine::general_purpose::STANDARD.encode(format!("{}:{}", username, password));
             headers.insert(AUTHORIZATION, HeaderValue::from_str(&format!("Basic {}", credentials))
-                .map_err(|e| Error::config(&format!("Invalid credentials: {}", e)))?);
+                .map_err(|e| Error::config(format!("Invalid credentials: {}", e)))?);
         }
 
         let url = format!("{}/api/v1/query", prom_config.url);
@@ -326,15 +326,15 @@ impl MonitoringModule {
             .form(&params)
             .send()
             .await
-            .map_err(|e| Error::service(&format!("Failed to query Prometheus: {}", e)))?;
+            .map_err(|e| Error::service(format!("Failed to query Prometheus: {}", e)))?;
 
         if !response.status().is_success() {
             let error_text = response.text().await.unwrap_or_default();
-            return Err(Error::service(&format!("Prometheus query failed: {}", error_text)));
+            return Err(Error::service(format!("Prometheus query failed: {}", error_text)));
         }
 
         let response_data: serde_json::Value = response.json().await
-            .map_err(|e| Error::service(&format!("Failed to parse Prometheus response: {}", e)))?;
+            .map_err(|e| Error::service(format!("Failed to parse Prometheus response: {}", e)))?;
 
         // Parse Prometheus response format
         let values = if let Some(data) = response_data.get("data").and_then(|d| d.get("result")).and_then(|r| r.as_array()) {
@@ -377,11 +377,11 @@ impl MonitoringModule {
         // Add authentication
         if let Some(token) = &prom_config.bearer_token {
             headers.insert(AUTHORIZATION, HeaderValue::from_str(&format!("Bearer {}", token))
-                .map_err(|e| Error::config(&format!("Invalid bearer token: {}", e)))?);
+                .map_err(|e| Error::config(format!("Invalid bearer token: {}", e)))?);
         } else if let (Some(username), Some(password)) = (&prom_config.username, &prom_config.password) {
             let credentials = base64::engine::general_purpose::STANDARD.encode(format!("{}:{}", username, password));
             headers.insert(AUTHORIZATION, HeaderValue::from_str(&format!("Basic {}", credentials))
-                .map_err(|e| Error::config(&format!("Invalid credentials: {}", e)))?);
+                .map_err(|e| Error::config(format!("Invalid credentials: {}", e)))?);
         }
 
         let url = format!("{}/api/v1/query_range", prom_config.url);
@@ -398,15 +398,15 @@ impl MonitoringModule {
             .form(&params)
             .send()
             .await
-            .map_err(|e| Error::service(&format!("Failed to query Prometheus range: {}", e)))?;
+            .map_err(|e| Error::service(format!("Failed to query Prometheus range: {}", e)))?;
 
         if !response.status().is_success() {
             let error_text = response.text().await.unwrap_or_default();
-            return Err(Error::service(&format!("Prometheus range query failed: {}", error_text)));
+            return Err(Error::service(format!("Prometheus range query failed: {}", error_text)));
         }
 
         let response_data: serde_json::Value = response.json().await
-            .map_err(|e| Error::service(&format!("Failed to parse Prometheus response: {}", e)))?;
+            .map_err(|e| Error::service(format!("Failed to parse Prometheus response: {}", e)))?;
 
         // Parse Prometheus range response format
         let values = if let Some(data) = response_data.get("data").and_then(|d| d.get("result")).and_then(|r| r.as_array()) {
@@ -420,7 +420,7 @@ impl MonitoringModule {
                     .iter()
                     .filter_map(|val| {
                         let arr = val.as_array()?;
-                        let timestamp = arr.get(0)?.as_f64()? as i64;
+                        let timestamp = arr.first()?.as_f64()? as i64;
                         let value = arr.get(1)?.as_str()?.parse().ok()?;
                         Some((DateTime::from_timestamp(timestamp, 0).unwrap_or_else(Utc::now), value))
                     })
@@ -456,11 +456,11 @@ impl MonitoringModule {
         // Add authentication
         if let Some(api_key) = &grafana_config.api_key {
             headers.insert(AUTHORIZATION, HeaderValue::from_str(&format!("Bearer {}", api_key))
-                .map_err(|e| Error::config(&format!("Invalid API key: {}", e)))?);
+                .map_err(|e| Error::config(format!("Invalid API key: {}", e)))?);
         } else if let (Some(username), Some(password)) = (&grafana_config.username, &grafana_config.password) {
             let credentials = base64::engine::general_purpose::STANDARD.encode(format!("{}:{}", username, password));
             headers.insert(AUTHORIZATION, HeaderValue::from_str(&format!("Basic {}", credentials))
-                .map_err(|e| Error::config(&format!("Invalid credentials: {}", e)))?);
+                .map_err(|e| Error::config(format!("Invalid credentials: {}", e)))?);
         }
 
         let url = format!("{}/api/search?type=dash-db", grafana_config.url);
@@ -470,15 +470,15 @@ impl MonitoringModule {
             .headers(headers)
             .send()
             .await
-            .map_err(|e| Error::service(&format!("Failed to list Grafana dashboards: {}", e)))?;
+            .map_err(|e| Error::service(format!("Failed to list Grafana dashboards: {}", e)))?;
 
         if !response.status().is_success() {
             let error_text = response.text().await.unwrap_or_default();
-            return Err(Error::service(&format!("Grafana dashboard listing failed: {}", error_text)));
+            return Err(Error::service(format!("Grafana dashboard listing failed: {}", error_text)));
         }
 
         let dashboards_data: serde_json::Value = response.json().await
-            .map_err(|e| Error::service(&format!("Failed to parse Grafana response: {}", e)))?;
+            .map_err(|e| Error::service(format!("Failed to parse Grafana response: {}", e)))?;
 
         let dashboards = if let Some(arr) = dashboards_data.as_array() {
             arr.iter().filter_map(|item| {
@@ -514,11 +514,11 @@ impl MonitoringModule {
         // Add authentication
         if let Some(api_key) = &grafana_config.api_key {
             headers.insert(AUTHORIZATION, HeaderValue::from_str(&format!("Bearer {}", api_key))
-                .map_err(|e| Error::config(&format!("Invalid API key: {}", e)))?);
+                .map_err(|e| Error::config(format!("Invalid API key: {}", e)))?);
         } else if let (Some(username), Some(password)) = (&grafana_config.username, &grafana_config.password) {
             let credentials = base64::engine::general_purpose::STANDARD.encode(format!("{}:{}", username, password));
             headers.insert(AUTHORIZATION, HeaderValue::from_str(&format!("Basic {}", credentials))
-                .map_err(|e| Error::config(&format!("Invalid credentials: {}", e)))?);
+                .map_err(|e| Error::config(format!("Invalid credentials: {}", e)))?);
         }
 
         let url = format!("{}/api/dashboards/db", grafana_config.url);
@@ -541,15 +541,15 @@ impl MonitoringModule {
             .json(&dashboard_json)
             .send()
             .await
-            .map_err(|e| Error::service(&format!("Failed to create Grafana dashboard: {}", e)))?;
+            .map_err(|e| Error::service(format!("Failed to create Grafana dashboard: {}", e)))?;
 
         if !response.status().is_success() {
             let error_text = response.text().await.unwrap_or_default();
-            return Err(Error::service(&format!("Grafana dashboard creation failed: {}", error_text)));
+            return Err(Error::service(format!("Grafana dashboard creation failed: {}", error_text)));
         }
 
         let response_data: serde_json::Value = response.json().await
-            .map_err(|e| Error::service(&format!("Failed to parse Grafana response: {}", e)))?;
+            .map_err(|e| Error::service(format!("Failed to parse Grafana response: {}", e)))?;
 
         let dashboard_id = response_data.get("id")
             .and_then(|id| id.as_i64())
@@ -586,11 +586,7 @@ impl MonitoringModule {
             }
         }
 
-        let endpoint = if otel_config.protocol == "grpc" {
-            format!("{}/v1/traces", otel_config.otlp_endpoint)
-        } else {
-            format!("{}/v1/traces", otel_config.otlp_endpoint)
-        };
+        let endpoint = format!("{}/v1/traces", otel_config.otlp_endpoint);
 
         // Convert traces to OTLP format (simplified JSON representation)
         let otlp_data = serde_json::json!({
@@ -636,11 +632,11 @@ impl MonitoringModule {
             .timeout(Duration::from_secs(otel_config.timeout))
             .send()
             .await
-            .map_err(|e| Error::service(&format!("Failed to send traces to OpenTelemetry: {}", e)))?;
+            .map_err(|e| Error::service(format!("Failed to send traces to OpenTelemetry: {}", e)))?;
 
         if !response.status().is_success() {
             let error_text = response.text().await.unwrap_or_default();
-            return Err(Error::service(&format!("OpenTelemetry trace sending failed: {}", error_text)));
+            return Err(Error::service(format!("OpenTelemetry trace sending failed: {}", error_text)));
         }
 
         Ok(())
@@ -670,11 +666,7 @@ impl MonitoringModule {
             }
         }
 
-        let endpoint = if otel_config.protocol == "grpc" {
-            format!("{}/v1/metrics", otel_config.otlp_endpoint)
-        } else {
-            format!("{}/v1/metrics", otel_config.otlp_endpoint)
-        };
+        let endpoint = format!("{}/v1/metrics", otel_config.otlp_endpoint);
 
         // Convert metrics to OTLP format (simplified JSON representation)
         let otlp_data = serde_json::json!({
@@ -762,11 +754,11 @@ impl MonitoringModule {
             .timeout(Duration::from_secs(otel_config.timeout))
             .send()
             .await
-            .map_err(|e| Error::service(&format!("Failed to send metrics to OpenTelemetry: {}", e)))?;
+            .map_err(|e| Error::service(format!("Failed to send metrics to OpenTelemetry: {}", e)))?;
 
         if !response.status().is_success() {
             let error_text = response.text().await.unwrap_or_default();
-            return Err(Error::service(&format!("OpenTelemetry metrics sending failed: {}", error_text)));
+            return Err(Error::service(format!("OpenTelemetry metrics sending failed: {}", error_text)));
         }
 
         Ok(())
@@ -785,7 +777,7 @@ impl MonitoringModule {
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         headers.insert(AUTHORIZATION, HeaderValue::from_str(&format!("Splunk {}", splunk_config.hec_token))
-            .map_err(|e| Error::config(&format!("Invalid HEC token: {}", e)))?);
+            .map_err(|e| Error::config(format!("Invalid HEC token: {}", e)))?);
 
         let hec_event = serde_json::json!({
             "time": event.timestamp.timestamp(),
@@ -807,11 +799,11 @@ impl MonitoringModule {
             .json(&hec_event)
             .send()
             .await
-            .map_err(|e| Error::service(&format!("Failed to send event to Splunk: {}", e)))?;
+            .map_err(|e| Error::service(format!("Failed to send event to Splunk: {}", e)))?;
 
         if !response.status().is_success() {
             let error_text = response.text().await.unwrap_or_default();
-            return Err(Error::service(&format!("Splunk event sending failed: {}", error_text)));
+            return Err(Error::service(format!("Splunk event sending failed: {}", error_text)));
         }
 
         Ok(())
@@ -834,11 +826,11 @@ impl MonitoringModule {
         // Add authentication
         if let Some(api_key) = &es_config.api_key {
             headers.insert(AUTHORIZATION, HeaderValue::from_str(&format!("ApiKey {}", api_key))
-                .map_err(|e| Error::config(&format!("Invalid API key: {}", e)))?);
+                .map_err(|e| Error::config(format!("Invalid API key: {}", e)))?);
         } else if let (Some(username), Some(password)) = (&es_config.username, &es_config.password) {
             let credentials = base64::engine::general_purpose::STANDARD.encode(format!("{}:{}", username, password));
             headers.insert(AUTHORIZATION, HeaderValue::from_str(&format!("Basic {}", credentials))
-                .map_err(|e| Error::config(&format!("Invalid credentials: {}", e)))?);
+                .map_err(|e| Error::config(format!("Invalid credentials: {}", e)))?);
         }
 
         // Use first URL from the list
@@ -865,15 +857,15 @@ impl MonitoringModule {
             .json(&search_body)
             .send()
             .await
-            .map_err(|e| Error::service(&format!("Failed to search Elasticsearch: {}", e)))?;
+            .map_err(|e| Error::service(format!("Failed to search Elasticsearch: {}", e)))?;
 
         if !response.status().is_success() {
             let error_text = response.text().await.unwrap_or_default();
-            return Err(Error::service(&format!("Elasticsearch search failed: {}", error_text)));
+            return Err(Error::service(format!("Elasticsearch search failed: {}", error_text)));
         }
 
         let search_result: serde_json::Value = response.json().await
-            .map_err(|e| Error::service(&format!("Failed to parse Elasticsearch response: {}", e)))?;
+            .map_err(|e| Error::service(format!("Failed to parse Elasticsearch response: {}", e)))?;
 
         // Parse Elasticsearch response
         let result = ElasticsearchResult {
@@ -928,12 +920,11 @@ impl MonitoringModule {
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         headers.insert("DD-API-KEY", HeaderValue::from_str(&dd_config.api_key)
-            .map_err(|e| Error::config(&format!("Invalid API key: {}", e)))?);
+            .map_err(|e| Error::config(format!("Invalid API key: {}", e)))?);
         headers.insert("DD-APPLICATION-KEY", HeaderValue::from_str(&dd_config.app_key)
-            .map_err(|e| Error::config(&format!("Invalid application key: {}", e)))?);
+            .map_err(|e| Error::config(format!("Invalid application key: {}", e)))?);
 
-        let api_url = dd_config.api_url.as_ref()
-            .map(|u| u.clone())
+        let api_url = dd_config.api_url.clone()
             .unwrap_or_else(|| format!("https://api.{}", dd_config.site));
         let url = format!("{}/api/v1/series", api_url);
 
@@ -955,11 +946,11 @@ impl MonitoringModule {
             .json(&series_data)
             .send()
             .await
-            .map_err(|e| Error::service(&format!("Failed to send metrics to Datadog: {}", e)))?;
+            .map_err(|e| Error::service(format!("Failed to send metrics to Datadog: {}", e)))?;
 
         if !response.status().is_success() {
             let error_text = response.text().await.unwrap_or_default();
-            return Err(Error::service(&format!("Datadog metrics sending failed: {}", error_text)));
+            return Err(Error::service(format!("Datadog metrics sending failed: {}", error_text)));
         }
 
         Ok(())
@@ -981,7 +972,7 @@ impl MonitoringModule {
 
         let mut headers = HeaderMap::new();
         headers.insert(AUTHORIZATION, HeaderValue::from_str(&format!("Bearer {}", token))
-            .map_err(|e| Error::config(&format!("Invalid token: {}", e)))?);
+            .map_err(|e| Error::config(format!("Invalid token: {}", e)))?);
 
         // Build query parameters
         let mut query_params = Vec::new();
@@ -1001,15 +992,15 @@ impl MonitoringModule {
             .headers(headers.clone())
             .send()
             .await
-            .map_err(|e| Error::service(&format!("Failed to query Crowdstrike detections: {}", e)))?;
+            .map_err(|e| Error::service(format!("Failed to query Crowdstrike detections: {}", e)))?;
 
         if !response.status().is_success() {
             let error_text = response.text().await.unwrap_or_default();
-            return Err(Error::service(&format!("Crowdstrike detection query failed: {}", error_text)));
+            return Err(Error::service(format!("Crowdstrike detection query failed: {}", error_text)));
         }
 
         let detection_ids: serde_json::Value = response.json().await
-            .map_err(|e| Error::service(&format!("Failed to parse Crowdstrike response: {}", e)))?;
+            .map_err(|e| Error::service(format!("Failed to parse Crowdstrike response: {}", e)))?;
 
         // Extract detection IDs and fetch detailed information
         if let Some(ids) = detection_ids.get("resources").and_then(|r| r.as_array()) {
@@ -1033,15 +1024,15 @@ impl MonitoringModule {
                 .json(&body)
                 .send()
                 .await
-                .map_err(|e| Error::service(&format!("Failed to get Crowdstrike detection details: {}", e)))?;
+                .map_err(|e| Error::service(format!("Failed to get Crowdstrike detection details: {}", e)))?;
 
             if !details_response.status().is_success() {
                 let error_text = details_response.text().await.unwrap_or_default();
-                return Err(Error::service(&format!("Crowdstrike detection details failed: {}", error_text)));
+                return Err(Error::service(format!("Crowdstrike detection details failed: {}", error_text)));
             }
 
             let details_data: serde_json::Value = details_response.json().await
-                .map_err(|e| Error::service(&format!("Failed to parse Crowdstrike details response: {}", e)))?;
+                .map_err(|e| Error::service(format!("Failed to parse Crowdstrike details response: {}", e)))?;
 
             let detections = if let Some(resources) = details_data.get("resources").and_then(|r| r.as_array()) {
                 resources.iter().filter_map(|detection| {
@@ -1081,7 +1072,7 @@ impl MonitoringModule {
         // Generate date and authorization signature
         let date = chrono::Utc::now().format("%a, %d %b %Y %H:%M:%S GMT").to_string();
         let json_data = serde_json::to_string(&logs)
-            .map_err(|e| Error::internal(&format!("Failed to serialize logs: {}", e)))?;
+            .map_err(|e| Error::internal(format!("Failed to serialize logs: {}", e)))?;
         
         let signature = self.build_azure_signature(
             &date,
@@ -1095,15 +1086,15 @@ impl MonitoringModule {
         let mut headers = HeaderMap::new();
         headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
         headers.insert("Log-Type", HeaderValue::from_str(&sentinel_config.log_type)
-            .map_err(|e| Error::config(&format!("Invalid log type: {}", e)))?);
+            .map_err(|e| Error::config(format!("Invalid log type: {}", e)))?);
         headers.insert("x-ms-date", HeaderValue::from_str(&date)
-            .map_err(|e| Error::config(&format!("Invalid date: {}", e)))?);
+            .map_err(|e| Error::config(format!("Invalid date: {}", e)))?);
         headers.insert(AUTHORIZATION, HeaderValue::from_str(&signature)
-            .map_err(|e| Error::config(&format!("Invalid signature: {}", e)))?);
+            .map_err(|e| Error::config(format!("Invalid signature: {}", e)))?);
         
         if let Some(resource_id) = &sentinel_config.resource_id {
             headers.insert("x-ms-AzureResourceId", HeaderValue::from_str(resource_id)
-                .map_err(|e| Error::config(&format!("Invalid resource ID: {}", e)))?);
+                .map_err(|e| Error::config(format!("Invalid resource ID: {}", e)))?);
         }
 
         let url = format!(
@@ -1117,11 +1108,11 @@ impl MonitoringModule {
             .body(json_data)
             .send()
             .await
-            .map_err(|e| Error::service(&format!("Failed to send logs to Azure Sentinel: {}", e)))?;
+            .map_err(|e| Error::service(format!("Failed to send logs to Azure Sentinel: {}", e)))?;
 
         if !response.status().is_success() {
             let error_text = response.text().await.unwrap_or_default();
-            return Err(Error::service(&format!("Azure Sentinel log sending failed: {}", error_text)));
+            return Err(Error::service(format!("Azure Sentinel log sending failed: {}", error_text)));
         }
 
         Ok(())
@@ -1194,15 +1185,15 @@ impl MonitoringModule {
             .body(body)
             .send()
             .await
-            .map_err(|e| Error::service(&format!("Failed to get Crowdstrike token: {}", e)))?;
+            .map_err(|e| Error::service(format!("Failed to get Crowdstrike token: {}", e)))?;
 
         if !response.status().is_success() {
             let error_text = response.text().await.unwrap_or_default();
-            return Err(Error::service(&format!("Crowdstrike token request failed: {}", error_text)));
+            return Err(Error::service(format!("Crowdstrike token request failed: {}", error_text)));
         }
 
         let token_data: serde_json::Value = response.json().await
-            .map_err(|e| Error::service(&format!("Failed to parse token response: {}", e)))?;
+            .map_err(|e| Error::service(format!("Failed to parse token response: {}", e)))?;
 
         token_data.get("access_token")
             .and_then(|t| t.as_str())
@@ -1231,10 +1222,10 @@ impl MonitoringModule {
         );
         
         let decoded_key = base64::engine::general_purpose::STANDARD.decode(workspace_key)
-            .map_err(|e| Error::config(&format!("Invalid workspace key: {}", e)))?;
+            .map_err(|e| Error::config(format!("Invalid workspace key: {}", e)))?;
         
         let mut mac = HmacSha256::new_from_slice(&decoded_key)
-            .map_err(|e| Error::internal(&format!("Failed to create HMAC: {}", e)))?;
+            .map_err(|e| Error::internal(format!("Failed to create HMAC: {}", e)))?;
         mac.update(string_to_hash.as_bytes());
         
         let result = mac.finalize();
@@ -1312,8 +1303,7 @@ impl MonitoringModule {
 
     /// Health check for Datadog
     async fn datadog_health_check(&self, config: &DatadogConfig) -> Result<bool> {
-        let api_url = config.api_url.as_ref()
-            .map(|u| u.clone())
+        let api_url = config.api_url.clone()
             .unwrap_or_else(|| format!("https://api.{}", config.site));
         let url = format!("{}/api/v1/validate", api_url);
         
