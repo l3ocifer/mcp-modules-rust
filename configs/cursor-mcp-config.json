@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "devops-mcp-rust": {
+      "command": "curl",
+      "args": [
+        "-X", "POST",
+        "-H", "Content-Type: application/json",
+        "-d", "@-",
+        "http://localhost:8888"
+      ],
+      "env": {
+        "MCP_SERVER_URL": "http://localhost:8888"
+      }
+    }
+  }
+}

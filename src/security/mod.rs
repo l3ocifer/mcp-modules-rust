@@ -13,10 +13,19 @@ use std::sync::Arc;
 use zeroize::Zeroize;
 
 /// High-performance security module with zero-copy optimizations
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct SecurityModule {
     rate_limiter: Arc<RateLimiter<NotKeyed, InMemoryState, DefaultClock>>,
     argon2: Argon2<'static>,
+}
+
+impl std::fmt::Debug for SecurityModule {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SecurityModule")
+            .field("rate_limiter", &"RateLimiter")
+            .field("argon2", &"Argon2")
+            .finish()
+    }
 }
 
 impl SecurityModule {

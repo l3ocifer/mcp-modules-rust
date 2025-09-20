@@ -17,7 +17,7 @@ path = "src/main.rs"
 
 [dependencies]
 # Core async runtime - Updated to fix vulnerability RUSTSEC-2025-0023
-tokio = { version = "1.46", features = ["full"] }
+tokio = { version = "1.35", features = ["full"] }
 async-trait = "0.1"
 futures = "0.3"
 futures-util = "0.3"
@@ -35,18 +35,18 @@ tower = "0.4"
 tower-http = { version = "0.5", features = ["cors", "trace"] }
 
 # WebSocket support with rustls for security
-tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"], default-features = false }
+tokio-tungstenite = { version = "0.20", features = ["rustls-tls-webpki-roots", "connect"], default-features = false }
 
 # OAuth 2.1 and authentication (MCP 2025-06-18)
 oauth2 = "5.0"
 url = "2.5"
-base64 = "0.22"
+base64 = "0.21"
 
 # JSON Schema validation (MCP 2025-06-18)
 jsonschema = "0.19"
 
 # UUID generation (MCP 2025-06-18)
-uuid = { version = "1.10", features = ["v4", "serde"] }
+uuid = { version = "1.6", features = ["v4", "serde"] }
 
 # Time handling
 chrono = { version = "0.4", features = ["serde"] }
@@ -56,12 +56,12 @@ thiserror = "2.0"
 anyhow = "1.0"
 
 # Security enhancements
-secrecy = "0.10"          # Secure storage for secrets
-zeroize = "1.8"           # Secure memory wiping
-ring = "0.17"             # Cryptographic primitives
-rustls = "0.23"           # Modern TLS implementation
-rustls-webpki = "0.103"   # Certificate validation
-rustls-pemfile = "2.0"    # PEM file support
+secrecy = "0.8"           # Secure storage for secrets
+zeroize = "1.7"           # Secure memory wiping
+ring = "0.16"             # Cryptographic primitives
+rustls = "0.21"           # Modern TLS implementation
+rustls-webpki = "0.101"   # Certificate validation
+rustls-pemfile = "1.0"    # PEM file support
 
 # Input validation and sanitization
 regex = "1.10"
@@ -70,7 +70,7 @@ percent-encoding = "2.3"
 
 # Rate limiting and security
 governor = "0.6"          # Rate limiting
-constant_time_eq = "0.4"  # Constant-time comparisons
+constant_time_eq = "0.3"  # Constant-time comparisons
 
 # Logging with security considerations
 log = "0.4"
@@ -98,15 +98,15 @@ k8s-openapi = { version = "0.24", features = ["latest"], optional = true }
 bollard = { version = "0.18", optional = true }
 
 # Security and cryptography
-argon2 = "0.5"           # Secure password hashing
-rand = "0.9"             # Cryptographically secure random numbers
-subtle = "2.6"           # Constant-time operations
+argon2 = "0.4"           # Secure password hashing
+rand = "0.8"             # Cryptographically secure random numbers
+subtle = "2.5"           # Constant-time operations
 hmac = "0.12"            # HMAC for message authentication
 sha2 = "0.10"            # SHA-2 hash functions
 
 # Additional security dependencies
-rustls-native-certs = "0.8"
-webpki-roots = "0.26"
+rustls-native-certs = "0.6"
+webpki-roots = "0.24"
 
 # File handling
 tempfile = "3.8"

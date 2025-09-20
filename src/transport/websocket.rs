@@ -117,7 +117,7 @@ impl Transport for WebSocketTransport {
             .map_err(|e| TransportError::ConnectionError(format!("Invalid URL: {}", e)))?;
 
         let (ws_stream, _response) = if url.scheme() == "wss" {
-            tokio_tungstenite::connect_async_tls_with_config(&self.url, None, false, None).await
+            tokio_tungstenite::connect_async(&self.url).await
         } else {
             tokio_tungstenite::connect_async(&self.url).await
         }
