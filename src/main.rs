@@ -90,7 +90,7 @@ async fn mcp_handler(Json(request): Json<JsonRpcRequest>) -> ResponseJson<JsonRp
     let response = match request.method.as_str() {
         "initialize" => handle_initialize(request.id, request.params),
         "tools/list" => handle_tools_list(request.id),
-        "tools/call" => handle_tools_call(request.id, request.params),
+        "tools/call" => handle_tools_call(request.id, request.params).await,
         _ => JsonRpcResponse {
             jsonrpc: "2.0".to_string(),
             id: request.id,
@@ -535,7 +535,7 @@ fn handle_tools_list(id: Option<Value>) -> JsonRpcResponse {
     }
 }
 
-fn handle_tools_call(id: Option<Value>, params: Option<Value>) -> JsonRpcResponse {
+async fn handle_tools_call(id: Option<Value>, params: Option<Value>) -> JsonRpcResponse {
     if let Some(params) = params {
         if let Some(tool_name) = params.get("name").and_then(|n| n.as_str()) {
             let empty_args = json!({});
@@ -821,22 +821,12 @@ fn handle_tools_call(id: Option<Value>, params: Option<Value>) -> JsonRpcRespons
                     let homelab_config = devops_mcp::homelab::HomelabConfig::default();
                     let homelab_manager = devops_mcp::homelab::HomelabManager::new(homelab_config);
                     
-                    match tokio::runtime::Runtime::new() {
-                        Ok(rt) => {
-                            match rt.block_on(homelab_manager.execute_tool(tool_name, arguments.clone())) {
-                                Ok(result) => result,
-                                Err(e) => json!({
-                                    "content": [{
-                                        "type": "text",
-                                        "text": format!("❌ Homelab Tool Error: {}\n\nTool: {}\nError: {}", tool_name, tool_name, e)
-                                    }]
-                                })
-                            }
-                        },
+                    match homelab_manager.execute_tool(tool_name, arguments.clone()).await {
+                        Ok(result) => result,
                         Err(e) => json!({
                             "content": [{
                                 "type": "text",
-                                "text": format!("❌ Runtime Error: Failed to create async runtime: {}", e)
+                                "text": format!("❌ Homelab Tool Error: {}\n\nTool: {}\nError: {}", tool_name, tool_name, e)
                             }]
                         })
                     }
