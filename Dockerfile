@@ -1,5 +1,5 @@
 # Multi-stage build for MCP Modules Rust
-FROM rust:1.80-slim as builder
+FROM rust:latest as builder
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y \
