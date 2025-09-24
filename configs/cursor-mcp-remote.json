@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "devops-mcp-rust": {
+      "command": "node",
+      "args": [
+        "/path/to/mcp-modules-rust/scripts/mcp-stdio-bridge-remote.js"
+      ],
+      "env": {
+        "MCP_SERVER_URL": "https://mcp.leopaska.xyz"
+      }
+    }
+  }
+}
