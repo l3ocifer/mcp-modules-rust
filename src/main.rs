@@ -489,6 +489,21 @@ fn handle_tools_list(id: Option<Value>) -> JsonRpcResponse {
         })
     ]);
 
+    // Homelab Infrastructure Tools
+    let homelab_config = devops_mcp::homelab::HomelabConfig::default();
+    let homelab_manager = devops_mcp::homelab::HomelabManager::new(homelab_config);
+    let homelab_tools: Vec<_> = homelab_manager.get_tool_definitions()
+        .into_iter()
+        .map(|tool| {
+            json!({
+                "name": tool.name,
+                "description": tool.description,
+                "inputSchema": tool.parameters.unwrap_or_else(|| json!({"type": "object", "properties": {}}))
+            })
+        })
+        .collect();
+    all_tools.extend(homelab_tools);
+
     // Core system tools
     all_tools.extend([
         json!({
@@ -796,6 +811,35 @@ fn handle_tools_call(id: Option<Value>, params: Option<Value>) -> JsonRpcRespons
                             "text": format!("🏛️ Government Grants Search\n\nQuery: \"{}\"\nCategory: {}\n\n💰 Available grants:\n• Grant 1: Technology Innovation Fund ($50,000)\n• Grant 2: Research Development Grant ($25,000)\n• Grant 3: Small Business Support ($15,000)\n\n📋 Application requirements:\n• Eligibility criteria\n• Required documentation\n• Deadline information\n\n💡 Real implementation includes:\n• Live grant databases\n• Application tracking\n• Deadline alerts\n• Eligibility matching", query, category.unwrap_or("all categories"))
                         }]
                     })
+                },
+
+                // Homelab Infrastructure Tools - delegate to homelab manager
+                "traefik_list_services" | "traefik_service_health" | "prometheus_query" | 
+                "grafana_dashboards" | "service_health_check" | "coolify_deployments" | 
+                "n8n_workflows" | "uptime_monitors" | "authelia_users" | 
+                "vaultwarden_status" | "vector_logs" => {
+                    let homelab_config = devops_mcp::homelab::HomelabConfig::default();
+                    let homelab_manager = devops_mcp::homelab::HomelabManager::new(homelab_config);
+                    
+                    match tokio::runtime::Runtime::new() {
+                        Ok(rt) => {
+                            match rt.block_on(homelab_manager.execute_tool(tool_name, arguments.clone())) {
+                                Ok(result) => result,
+                                Err(e) => json!({
+                                    "content": [{
+                                        "type": "text",
+                                        "text": format!("❌ Homelab Tool Error: {}\n\nTool: {}\nError: {}", tool_name, tool_name, e)
+                                    }]
+                                })
+                            }
+                        },
+                        Err(e) => json!({
+                            "content": [{
+                                "type": "text",
+                                "text": format!("❌ Runtime Error: Failed to create async runtime: {}", e)
+                            }]
+                        })
+                    }
                 },
 
                 _ => json!({

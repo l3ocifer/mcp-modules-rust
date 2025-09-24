@@ -44,6 +44,9 @@ pub mod research;
 pub mod smart_home;
 pub mod web;
 
+// Homelab management module
+pub mod homelab;
+
 // Re-export core types for performance-optimized API
 pub use client::Mcp;
 pub use config::Config;

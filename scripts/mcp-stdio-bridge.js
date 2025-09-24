@@ -8,7 +8,7 @@
 const http = require('http');
 const readline = require('readline');
 
-const MCP_SERVER_URL = 'http://localhost:8888';
+const MCP_SERVER_URL = 'http://localhost:8890';
 
 // Create readline interface for stdio
 const rl = readline.createInterface({
@@ -24,7 +24,7 @@ function sendToMCPServer(data) {
     
     const options = {
       hostname: 'localhost',
-      port: 8888,
+      port: 8890,
       path: '/',
       method: 'POST',
       headers: {
